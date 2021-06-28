@@ -1,19 +1,19 @@
 # Drug Effects For Conditions
 
-Data Engineering Challenge
-
+Data Engineering Challenge  
+  
 Health care company often deals with claims data, broken out into medical and pharmacy records,
 to map out the longitudinal clinical history of patients. In this fake use case, we are looking to
 identify the patients who have developed a certain condition (Let’s call it Y), after taking a
 particular drug (Let’s call it X). To allow such effort, the data engineering team is asked to help
-with the data set dummy_data.csv (attached):
-
-It has four tabs:
-● medical_data_sample
-● pharmacy_data_sample
-● ndc
-● diagnosis_code
-
+with the data set dummy_data.csv (attached):  
+  
+It has four tabs:  
+● medical_data_sample  
+● pharmacy_data_sample  
+● ndc  
+● diagnosis_code  
+  
 Medical and pharmacy are typically managed by separate entities, so that’s why the data often
 comes in two pieces. The Medical data covers the billing information for doctor visits, surgeries,
 diagnostics, usually submitted by medical providers, and the pharmacy data covers the billing
