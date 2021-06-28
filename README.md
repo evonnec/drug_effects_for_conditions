@@ -63,10 +63,31 @@ might or might not fully agree with the record of that user in the backend datab
 you go about designing a warehouse storing information from both sources? What aspects
 would you consider in this design?
 
-2. If table A, column X has n rows with value J and table B, column Y has m rows with value J,
+2. If table A, column X has n rows with value J 
+and 
+table B, column Y has m rows with value J,
+
 then when we join A and B on X and Y, how many rows will the value J appear in, assuming
 both m and n are greater than zero?
 
 Your answer should include the following pieces:
 - Executable piece of code that does Question 1
 - Write-up on Question 2, 3 and short questions
+
+## How to Run program for Q1:
+`python de_dupe_ndc.py pharmacy_data_sample cleaned_pharm_data`
+where `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for
+and `cleaned_pharm_data` is the output csv filename to write to.
+requirements: the input / output files and python should be in the same folder
+
+## Question 2:
+please find description of initial plan in clean_data_testing_framework.py
+
+## Question 3:
+The script is generally optimized. One thing that could be done further is to perform the cleaning on a vector. Right now we iter thru each row, make the adjustment to the index position we want and add the other pieces back on. numpy is a library to consider for it. We can also perhaps use data structures that python provides if they are faster than numpy and simply change our code. Vector transformations are generally faster and make sense for large datasets.
+
+## Short Questions:
+1. I might consider a system in which we require product users to use their account in order to engage with the chatbot such that the name, email etc is consistent across data stores. Otherwise, we can perform a match on the user engaging with the chatbot and our list of product users. If not an exact match, we can use a classifier model in order to match them if it matters greatly. I would enforce it at ingestion to avoid having to deal with differing data that would remain disparate until an action is performed to unify them.
+
+2. It depends on what type of join we are using. if we are using a left join on A, n rows. if left join on B, m rows.
+If we are doing an outer join in the event that either table has NULL for the J value that the other table has a value, it will be the set of (A's n rows union B's m rows). if it's inner join, we will only see the rows in which the J value is there for both A and B tables.

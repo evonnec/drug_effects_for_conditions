@@ -7,13 +7,13 @@
 
 ## Question 1:
 ## The claims data comes with duplicates and NDCs are messy. 
-# Please write a script to de-deduplicate the data 
-# (Note: rows identical to each other in every single column is considered duplicate) 
-# and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
+## Please write a script to de-deduplicate the data 
+## (Note: rows identical to each other in every single column is considered duplicate) 
+## and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
 
 ## Question 3:
-# Is your de-duplication script optimized for large-scale data? If not, how would you go about
-# optimizing it? Please describe the algorithm step=by-step (pseudo-code is fine) 
+## Is your de-duplication script optimized for large-scale data? If not, how would you go about
+## optimizing it? Please describe the algorithm step=by-step (pseudo-code is fine) 
 
 from csv import reader, writer
 from typing import Set, Tuple, Any
