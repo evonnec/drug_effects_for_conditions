@@ -75,19 +75,21 @@ Your answer should include the following pieces:
 - Write-up on Question 2, 3 and short questions
 
 ## How to Run program for Q1:
-`python de_dupe_ndc.py pharmacy_data_sample cleaned_pharm_data`
-where `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for
-and `cleaned_pharm_data` is the output csv filename to write to.
-requirements: the input / output files and python should be in the same folder
-
-## Question 2:
-please find description of initial plan in clean_data_testing_framework.py
-
-## Question 3:
-The script is generally optimized. One thing that could be done further is to perform the cleaning on a vector. Right now we iter thru each row, make the adjustment to the index position we want and add the other pieces back on. numpy is a library to consider for it. We can also perhaps use data structures that python provides if they are faster than numpy and simply change our code. Vector transformations are generally faster and make sense for large datasets.
-
-## Short Questions:
-1. I might consider a system in which we require product users to use their account in order to engage with the chatbot such that the name, email etc is consistent across data stores. Otherwise, we can perform a match on the user engaging with the chatbot and our list of product users. If not an exact match, we can use a classifier model in order to match them if it matters greatly. I would enforce it at ingestion to avoid having to deal with differing data that would remain disparate until an action is performed to unify them.
-
+`python de_dupe_ndc.py pharmacy_data_sample cleaned_pharm_data` where:
+- `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for  
+and  
+- `cleaned_pharm_data` is the output csv filename to write to.  
+  
+requirements: the input / output files and python should be in the same folder on the filesystem.
+  
+## Question 2:  
+please find description of initial plan in clean_data_testing_framework.py  
+  
+## Question 3:  
+The script is generally optimized with enforced typing. One thing that could be done further is to perform the cleaning on a vector. Right now we iter thru each row, make the adjustment to the index position we want and add the other pieces back on. numpy is a library to consider for it. We can also perhaps use data structures that python provides if they are faster than numpy and simply change our code. Vector transformations are generally faster and make sense for large datasets.  
+  
+## Short Questions:  
+1. I might consider a system in which we require product users to use their account in order to engage with the chatbot such that the name, email etc is consistent across data stores. Otherwise, we can perform a match on the user engaging with the chatbot and our list of product users. If not an exact match, we can use a classifier model in order to match them if it matters greatly. I would enforce it at ingestion to avoid having to deal with differing data that would remain disparate until an action is performed to unify them.  
+  
 2. It depends on what type of join we are using. if we are using a left join on A, n rows. if left join on B, m rows.
-If we are doing an outer join in the event that either table has NULL for the J value that the other table has a value, it will be the set of (A's n rows union B's m rows). if it's inner join, we will only see the rows in which the J value is there for both A and B tables.
+If we are doing an outer join in the event that either table has NULL for the J value that the other table has a value, it will be the set of (A's n rows union B's m rows). if it's inner join, we will only see the rows in which the J value is there for both A and B tables.  

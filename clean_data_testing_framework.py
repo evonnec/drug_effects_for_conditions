@@ -33,6 +33,9 @@ class Testdedupe:
 
     The laundry list for identifying these cases is a long one. These are examples of perhaps of where I'd start, 
     in terms of brainstorming on this task. And based on demands from the business side, these can be prioritized.
+
+    One of the things I am already doing is enforcing types in de_dupe_ndc.py for input and output
+    We want to know that the types we send are what we get back out.
     """
     def test_no_dupes_in_make_set(self):
         test_set = dedent(
@@ -43,9 +46,7 @@ class Testdedupe:
             """
         )
         actual_output = make_set(test_set)
-        print(actual_output, type(actual_output))
         expected_output = {('1', '2', '3', '4', '5'), ('a', 'b', 'c', 'd', 'e')}
-        print(expected_output, type(expected_output))
         assert expected_output == actual_output
 
 if __name__ == "__main__":
