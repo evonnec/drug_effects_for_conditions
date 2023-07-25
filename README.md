@@ -84,9 +84,10 @@ Your answer should include the following pieces:
 - `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for  
 and  
 - `cleaned_pharm_data` is the output csv filename to write to.  
-  
-requirements: the input / output files and python should be in the same folder on the filesystem.
-  
+
+## How to Run tests for program:
+`python -m pytest`
+
 ## Question 2:  
 please find description of initial plan in `tests/clean_data_testing_framework.py`  
   
