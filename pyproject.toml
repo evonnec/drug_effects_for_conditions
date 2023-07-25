@@ -11,4 +11,14 @@ dependencies = [
 version = "0.1"
 
 [tool.mypy]
+[[toolmypy.overrides]]
+module = []
+ignore_missing_imports = true
 
+[tool.pytest.ini_options]
+pythonpath = [
+  "src",
+]
+addopts = [
+    "--import-mode=importlib",
+]

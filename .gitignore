@@ -131,3 +131,4 @@ dmypy.json
 # IDE and OS
 .metals
 .vscode
+drugeffects/

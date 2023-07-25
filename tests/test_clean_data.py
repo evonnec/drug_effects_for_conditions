@@ -9,7 +9,7 @@
 # Feel free to start high- level, zoom into one data field, 
 # e.g. NDC, and flesh it out to show how you would design it, using it as an example.
 
-from src.drug_effects_for_conditions.de_dupe_ndc import make_set, format_ndc_field, write_set
+from drug_effects_for_conditions.de_dupe_ndc import make_set, format_ndc_field, write_set
 from textwrap import dedent
 import pytest
 
@@ -39,15 +39,9 @@ class Testdedupe:
     for input and output. We want to know that the types we send are what we get back out.
     """
     def test_no_dupes_in_make_set(self):
-        test_set = dedent(
-            """
-            '1', '2', '3', '4', '5'
-            '1', '2', '3', '4', '5'
-            'a', 'b', 'c', 'd', 'e'
-            """
-        )
+        test_set = 'test_no_dupes.csv'
         actual_output = make_set(test_set)
-        expected_output = {('1', '2', '3', '4', '5'), ('a', 'b', 'c', 'd', 'e')}
+        expected_output = {("1", "2", "3", "4", "5"), ("a", "b", "c", "d", "e")}
         assert expected_output == actual_output
 
 if __name__ == "__main__":
