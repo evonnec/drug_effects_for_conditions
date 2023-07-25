@@ -1,0 +1,14 @@
+# configuration for linters and project
+[project]
+name = "drug_effects_for_conditions"
+dependencies = [
+    "pytest",
+    "pyproject-toml",
+    "mypy",
+    "black",
+    "ruff",
+]
+version = "0.1"
+
+[tool.mypy]
+

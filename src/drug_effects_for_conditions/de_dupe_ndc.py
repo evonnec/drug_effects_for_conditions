@@ -1,19 +1,3 @@
-#!/usr/bin/env python
-
-## Remove common issues (unsaid: from pharmacy_data_sample.csv)
-## - dashes between the numbers, 
-## - and missing 0 on the front, among others. 
-## For the scope of this exercise, let’s consider these two as the only two issues.
-
-## Question 1:
-## The claims data comes with duplicates and NDCs are messy. 
-## Please write a script to de-deduplicate the data 
-## (Note: rows identical to each other in every single column is considered duplicate) 
-## and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
-
-## Question 3:
-## Is your de-duplication script optimized for large-scale data? If not, how would you go about
-## optimizing it? Please describe the algorithm step=by-step (pseudo-code is fine) 
 
 from csv import reader, writer
 from typing import Set, Tuple, Any

@@ -9,7 +9,7 @@
 # Feel free to start high- level, zoom into one data field, 
 # e.g. NDC, and flesh it out to show how you would design it, using it as an example.
 
-from de_dupe_ndc import make_set, format_ndc_field, write_set
+from src.drug_effects_for_conditions.de_dupe_ndc import make_set, format_ndc_field, write_set
 from textwrap import dedent
 import pytest
 
@@ -34,8 +34,9 @@ class Testdedupe:
     The laundry list for identifying these cases is a long one. These are examples of perhaps of where I'd start, 
     in terms of brainstorming on this task. And based on demands from the business side, these can be prioritized.
 
-    One of the things I am already doing is enforcing types in de_dupe_ndc.py for input and output
-    We want to know that the types we send are what we get back out.
+    One of the things I am already doing is enforcing types in the signature of 
+    `src/drug_effects_for_conditions/de_dupe_ndc.py` 
+    for input and output. We want to know that the types we send are what we get back out.
     """
     def test_no_dupes_in_make_set(self):
         test_set = dedent(

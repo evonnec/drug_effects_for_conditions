@@ -1,24 +1,18 @@
-# Drug Effects For Conditions
-
-Data Engineering Challenge  
+# Drug Effects For Conditions  
   
 Health care company often deals with claims data, broken out into medical and pharmacy records,
-to map out the longitudinal clinical history of patients. In this fake use case, we are looking to
-identify the patients who have developed a certain condition (Let’s call it Y), after taking a
-particular drug (Let’s call it X). To allow such effort, the data engineering team is asked to help
-with the data set dummy_data.csv (attached):  
+to map out the longitudinal clinical history of patients. In this example use case, we are looking to identify the patients who have developed a certain condition `Y`, after taking a particular drug `X`. 
+
+To allow for it, use the data set dummy_data.csv (attached):  
   
-It has four tabs:  
+It has four data source files:  
 ● medical_data_sample  
-● pharmacy_data_sample  
+● pharmacy_data_sample   
 ● ndc  
 ● diagnosis_code  
   
 Medical and pharmacy are typically managed by separate entities, so that’s why the data often
-comes in two pieces. The Medical data covers the billing information for doctor visits, surgeries,
-diagnostics, usually submitted by medical providers, and the pharmacy data covers the billing
-information of prescription drugs and therapies. For example, if a patient gets a prescription from
-CVS, this record would appear in the pharmacy claim data, as opposed to the medical.
+comes in two pieces. The Medical data covers the billing information for doctor visits, surgeries, diagnostics, usually submitted by medical providers, and the pharmacy data covers the billing information of prescription drugs and therapies. For example, if a patient gets a prescription from CVS, this record would appear in the pharmacy claim data, as opposed to the medical.
 
 For the medical_data:
 - Timestamped via Service_Date
@@ -33,13 +27,19 @@ For the prescription_data:
 between the numbers, and missing 0 on the front, among others. For the scope of this
 exercise, let’s consider these two as the only two issues.
 
-Additionally, the ndc tab provides the list of NDC codes for the Drug X
-And the diagnosis_code tab provides the list of diagnosis_code for the Condition Y
+Additionally, the ndc file provides the list of NDC codes for the Drug X
+And the diagnosis_code file provides the list of diagnosis_code for the Condition Y
 
 Question 1:
 
 The claims data comes with duplicates and NDCs are messy. Please write a script to de-
-deduplicate the data (Note:rows identical to each other in every single column is considered duplicate) and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
+deduplicate the data (Note: rows identical to each other in every single column is considered duplicate) and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
+
+Remove common issues (unsaid: from pharmacy_data_sample.csv)
+ - dashes between the numbers, 
+ - and missing 0 on the front, among others. 
+
+For the scope of this exercise, let’s consider these two as the only two issues.
 
 Question 2 :
 
@@ -74,8 +74,13 @@ Your answer should include the following pieces:
 - Executable piece of code that does Question 1
 - Write-up on Question 2, 3 and short questions
 
+## Set Up
+`python -m venv drugeffects`
+`source drugeffects/bin/activate`
+`pip install -e .`
+  
 ## How to Run program for Q1:
-`python de_dupe_ndc.py pharmacy_data_sample cleaned_pharm_data` where:
+`python src/drug_effects_for_conditions/de_dupe_ndc.py data/pharmacy_data_sample output/cleaned_pharm_data` where:
 - `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for  
 and  
 - `cleaned_pharm_data` is the output csv filename to write to.  
@@ -83,7 +88,7 @@ and
 requirements: the input / output files and python should be in the same folder on the filesystem.
   
 ## Question 2:  
-please find description of initial plan in clean_data_testing_framework.py  
+please find description of initial plan in `tests/clean_data_testing_framework.py`  
   
 ## Question 3:  
 The script is generally optimized with enforced typing. One thing that could be done further is to perform the cleaning on a vector. Right now we iter thru each row, make the adjustment to the index position we want and add the other pieces back on. numpy is a library to consider for it. We can also perhaps use data structures that python provides if they are faster than numpy and simply change our code. Vector transformations are generally faster and make sense for large datasets.  
