@@ -86,11 +86,11 @@ def test_header_only(write_csv: WriteCsv, tmp_path: Path) -> None:
 
 
 def test_sample_parity(tmp_path: Path) -> None:
-    root = Path(__file__).parents[1]
-    sample = root / "data" / "pharmacy_data_sample.csv"
-    old = root / "output" / "cleaned_pharm_data.csv"
-    if not (sample.is_file() and old.is_file()):
-        pytest.skip("sample data or legacy output missing")
+    sample = Path(__file__).parents[1] / "data" / "pharmacy_data_sample.csv"
+    # Output of the original stdlib-csv implementation on the sample (no header, set order).
+    old = Path(__file__).parent / "fixtures" / "legacy_cleaned_pharm_data.csv"
+    if not sample.is_file():
+        pytest.skip("sample data missing")
     out = tmp_path / "out.csv"
     stats = dedupe_ndc_pharm_data(sample, out)
     new_rows = {tuple(r) for r in read_rows(out)[1:]}
