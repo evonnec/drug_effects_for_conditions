@@ -308,7 +308,7 @@ def test_real_process_prints_one_error_line_and_no_traceback(tmp_path: Path) -> 
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="untracked: library truncates INPUT when OUTPUT is a link to it",
+    reason="#20: library truncates INPUT when OUTPUT is a link to it",
 )
 def test_library_never_truncates_input_through_a_link(
     tmp_path: Path, kind: Literal["hard", "sym"], make_link: MakeLink
@@ -328,7 +328,7 @@ def test_library_never_truncates_input_through_a_link(
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="untracked: OUTPUT-side FileNotFoundError is reported as a missing INPUT",
+    reason="#21: OUTPUT-side FileNotFoundError is reported as a missing INPUT",
 )
 def test_output_side_file_not_found_does_not_blame_the_input(
     src: Path, tmp_path: Path, make_link: MakeLink, capsys: pytest.CaptureFixture[str]
@@ -344,7 +344,7 @@ def test_output_side_file_not_found_does_not_blame_the_input(
 @pytest.mark.xfail(
     strict=True,
     raises=AssertionError,
-    reason="untracked: a failed run still creates OUTPUT's parent directories",
+    reason="#21: a failed run still creates OUTPUT's parent directories",
 )
 def test_failed_run_creates_no_directories(
     tmp_path: Path, assert_clean_failure: CleanFailure
