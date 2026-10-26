@@ -27,6 +27,11 @@ Columns: `Patient_ID`, `Diagnosis_Code_1`, `Diagnosis_Code_2`, `Diagnosis_Code_3
   missing.
 - A claim can carry up to four diagnosis codes.
 - The amount columns are in the opposite order from the pharmacy file (`Amount_Paid` first).
+- Cleaning (`dedupe-medical`) strips the padding, so each of the 1,715 exact duplicates collapses
+  and the output has 28,285 rows. Unused diagnosis slots become empty fields: 0, 12,140, 15,841
+  and 18,860 of them in `Diagnosis_Code_1` to `Diagnosis_Code_4`, 46,841 in all.
+- Rows that share patient, date and codes but differ in an amount are separate claim lines (patient
+  5 on 4/17/2016 has four) and are kept.
 
 ## ndc.csv
 

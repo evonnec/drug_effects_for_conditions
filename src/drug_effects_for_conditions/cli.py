@@ -8,11 +8,9 @@ from pathlib import Path
 from drug_effects_for_conditions import __version__
 
 # Lazy so `--help` and `--version` don't pay for importing polars.
-lazy from drug_effects_for_conditions.pharmacy import (
-    PharmacySchemaError,
-    dedupe_ndc_pharm_data,
-    default_rejects_path,
-)
+lazy from drug_effects_for_conditions.claims import ClaimsSchemaError, CleanStats
+lazy from drug_effects_for_conditions.medical import dedupe_medical_data
+lazy from drug_effects_for_conditions.pharmacy import dedupe_ndc_pharm_data, default_rejects_path
 
 PROG = "drug-effects-for-conditions"
 EXIT_REJECTED = 3  # --strict and at least one row rejected; 2 is argparse's usage error
@@ -49,6 +47,17 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"exit with code {EXIT_REJECTED} if any row was rejected",
     )
+
+    medical = sub.add_parser(
+        "dedupe-medical",
+        help="de-duplicate a medical claims CSV",
+        description=(
+            "Strip the padding from diagnosis codes and drop exact-duplicate medical claim rows. "
+            "Rows that differ in an amount are separate claim lines and are kept."
+        ),
+    )
+    medical.add_argument("input", metavar="INPUT", type=Path, help="medical claims CSV to read")
+    medical.add_argument("output", metavar="OUTPUT", type=Path, help="CSV file to write")
     return parser
 
 
@@ -57,21 +66,35 @@ def _error(message: str) -> int:
     return 1
 
 
+def _same_file(a: Path, b: Path) -> bool:
+    # resolve() catches a not-yet-existing path; samefile() catches hard links.
+    return a.resolve() == b.resolve() or (a.exists() and b.exists() and a.samefile(b))
+
+
+def _check_paths(input_path: Path, output_path: Path) -> str | None:
+    """The error message for unusable INPUT/OUTPUT paths, or None."""
+    if not input_path.is_file():
+        return f"input file not found: {input_path}"
+    if _same_file(input_path, output_path):
+        return "OUTPUT must be a different file from INPUT"
+    return None
+
+
+def _summary(stats: CleanStats, output_path: Path, *, rejects: bool) -> str:
+    detail = f"{stats.duplicates_removed} duplicates removed, {stats.blank_rows} blank"
+    if rejects:
+        detail += f", {stats.rejected} rejected"
+    return f"read {stats.rows_in} rows, wrote {stats.rows_out} rows ({detail}) to {output_path}"
+
+
 def _dedupe_pharmacy(
     input_path: Path, output_path: Path, rejects_path: Path | None, *, strict: bool
 ) -> int:
-    if not input_path.is_file():
-        return _error(f"input file not found: {input_path}")
-    # resolve() catches a not-yet-existing output; samefile() catches hard links.
-    if input_path.resolve() == output_path.resolve() or (
-        output_path.exists() and input_path.samefile(output_path)
-    ):
-        return _error("OUTPUT must be a different file from INPUT")
+    if message := _check_paths(input_path, output_path):
+        return _error(message)
     rejects_path = rejects_path or default_rejects_path(output_path)
     for other in (input_path, output_path):
-        if rejects_path.resolve() == other.resolve() or (
-            rejects_path.exists() and other.exists() and rejects_path.samefile(other)
-        ):
+        if _same_file(rejects_path, other):
             return _error(f"rejects file must be different from {other}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rejects_path.parent.mkdir(parents=True, exist_ok=True)
@@ -79,18 +102,27 @@ def _dedupe_pharmacy(
         stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
     except FileNotFoundError:
         return _error(f"input file not found: {input_path}")
-    except PharmacySchemaError as exc:
+    except ClaimsSchemaError as exc:
         return _error(str(exc))
-    print(
-        f"read {stats.rows_in} rows, wrote {stats.rows_out} rows "
-        f"({stats.duplicates_removed} duplicates removed, {stats.blank_rows} blank, "
-        f"{stats.rejected} rejected) to {output_path}",
-        file=sys.stderr,
-    )
+    print(_summary(stats, output_path, rejects=True), file=sys.stderr)
     if stats.rejected:
         print(f"wrote {stats.rejected} rejected rows to {rejects_path}", file=sys.stderr)
         if strict:
             return EXIT_REJECTED
+    return 0
+
+
+def _dedupe_medical(input_path: Path, output_path: Path) -> int:
+    if message := _check_paths(input_path, output_path):
+        return _error(message)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        stats = dedupe_medical_data(input_path, output_path)
+    except FileNotFoundError:
+        return _error(f"input file not found: {input_path}")
+    except ClaimsSchemaError as exc:
+        return _error(str(exc))
+    print(_summary(stats, output_path, rejects=False), file=sys.stderr)
     return 0
 
 
@@ -100,5 +132,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     match args.command:
         case "dedupe-pharmacy":
             return _dedupe_pharmacy(args.input, args.output, args.rejects, strict=args.strict)
+        case "dedupe-medical":
+            return _dedupe_medical(args.input, args.output)
         case _:  # pragma: no cover - argparse rejects unknown commands
             raise AssertionError(args.command)
