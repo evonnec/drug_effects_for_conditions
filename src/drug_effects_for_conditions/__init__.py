@@ -1,4 +1,4 @@
-"""Clean pharmacy and medical claims data."""
+"""Clean pharmacy and medical claims data and find drug-effect cohorts."""
 
 from importlib.metadata import PackageNotFoundError, version
 
@@ -7,6 +7,13 @@ from drug_effects_for_conditions.claims import (
     CleanStats,
     StrPath,
     scan_claims,
+)
+from drug_effects_for_conditions.cohort import (
+    CohortSummary,
+    condition_events,
+    developed_after,
+    first_exposure,
+    summarize,
 )
 from drug_effects_for_conditions.medical import (
     DIAGNOSIS_COLUMNS,
@@ -52,6 +59,7 @@ __all__ = [
     "ClaimsSchemaError",
     "CleanResult",
     "CleanStats",
+    "CohortSummary",
     "MedicalSchemaError",
     "PharmacySchemaError",
     "ReferenceFileError",
@@ -59,8 +67,11 @@ __all__ = [
     "__version__",
     "clean_medical",
     "clean_pharmacy",
+    "condition_events",
     "dedupe_medical_data",
     "dedupe_ndc_pharm_data",
+    "developed_after",
+    "first_exposure",
     "is_valid_ndc",
     "load_diagnosis_codes",
     "load_ndc_list",
@@ -71,4 +82,5 @@ __all__ = [
     "scan_claims",
     "scan_medical",
     "scan_pharmacy",
+    "summarize",
 ]

@@ -35,13 +35,20 @@ Columns: `Patient_ID`, `Diagnosis_Code_1`, `Diagnosis_Code_2`, `Diagnosis_Code_3
 
 ## ndc.csv
 
-NDCs for drug X. No header, 500 lines (404 distinct), one 11-digit code per line.
+NDCs for drug X. No header, 500 lines (404 distinct), one 11-digit code per line. `load_ndc_list`
+reads it.
 
 ## diagnosis_code.csv
 
 Diagnosis codes for condition Y. No header, 200 lines (146 distinct), one code per line. Some
-lines carry trailing spaces. Codes are 3 to 5 digits
-with no decimal point.
+lines carry trailing spaces (the V-codes are padded to 8 characters). Codes are 3 to 5 characters,
+digits or a leading `V`, with no decimal point. `load_diagnosis_codes` reads it.
+
+## Coverage
+
+Medical `Service_Date` runs from 2013-07-09 to 2016-05-19 and pharmacy `Date_Submitted` from
+2015-10-29 to 2016-11-24, so the cohort command can observe outcomes only up to May 2016. See
+the README for what that means for `--washout-days`.
 
 Because neither reference file has a header, read them with `has_header=False` (polars) or
 `header=None` (pandas), and read the NDC column as a string so leading zeros survive.
