@@ -24,11 +24,6 @@ type CleanFailure = Callable[[int], str]
 HDR = b"Patient_ID,Date_Submitted,NDC,Amount_Billed,Amount_Paid"
 ROW = b"1,2020-01-01,00002322730,1.00,2.00\n"
 
-# Every xfail names the exception it fails with today (`raises=`). A fixture bug, or a change in
-# *how* a case fails, then shows up as a real failure instead of hiding behind the marker. For the
-# #9 cases this also guards today's behavior: a "fix" such as `truncate_ragged_lines=True` or
-# `encoding="utf8-lossy"` turns the polars error into a silent success, and the test fails loudly.
-
 
 def _case(
     name: str, data: bytes, expected: bytes, mark: pytest.MarkDecorator | None = None
@@ -217,24 +212,15 @@ def test_cli_rejects_option_sets_the_path(tmp_path: Path) -> None:
 
 # --- #9: malformed input -------------------------------------------------------------------------
 
-XFAIL_9 = pytest.mark.xfail(
-    strict=True, raises=PolarsError, reason="#9: CLI prints a traceback instead of an error"
-)
-XFAIL_9_SHORT = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="#9: short rows are silently null-filled"
-)
-
 # Inputs the CLI must refuse with one "error: ..." line and exit code 1 (never a traceback).
 REJECTED_INPUTS = [
-    pytest.param(b"", id="zero_byte_file", marks=XFAIL_9),
-    pytest.param(b"\xef\xbb\xbf", id="bom_only", marks=XFAIL_9),
-    pytest.param(HDR + b"\n1,d,5,1,2,3\n", id="long_row", marks=XFAIL_9),
-    pytest.param(
-        HDR + b"\n" + ROW * 3 + b"1,d,5,1,2,3\n", id="long_row_after_good_rows", marks=XFAIL_9
-    ),
-    pytest.param(HDR + b"\n1,d,5,1\n", id="short_row", marks=XFAIL_9_SHORT),
-    pytest.param(HDR + b"\n\xff,d,5,1,2\n", id="invalid_utf8", marks=XFAIL_9),
-    pytest.param(HDR + b'\n1,d,5,a"b,2\n', id="stray_quote", marks=XFAIL_9),
+    pytest.param(b"", id="zero_byte_file"),
+    pytest.param(b"\xef\xbb\xbf", id="bom_only"),
+    pytest.param(HDR + b"\n1,d,5,1,2,3\n", id="long_row"),
+    pytest.param(HDR + b"\n" + ROW * 3 + b"1,d,5,1,2,3\n", id="long_row_after_good_rows"),
+    pytest.param(HDR + b"\n1,d,5,1\n", id="short_row"),
+    pytest.param(HDR + b"\n\xff,d,5,1,2\n", id="invalid_utf8"),
+    pytest.param(HDR + b'\n1,d,5,a"b,2\n', id="stray_quote"),
     pytest.param(b"patient_id" + HDR[10:] + b"\n" + ROW, id="header_lowercase"),
     pytest.param(
         b"Patient_ID,NDC,Date_Submitted,Amount_Billed,Amount_Paid\n1,5,d,1,2\n", id="header_order"
@@ -258,9 +244,6 @@ def test_cli_rejects_with_clean_error(
     assert sorted(p.name for p in tmp_path.iterdir()) == ["bad.csv"], "a failed run left files"
 
 
-@pytest.mark.xfail(
-    strict=True, raises=pytest.fail.Exception, reason="#9: short rows are silently null-filled"
-)
 def test_short_row_is_an_error_in_the_library(run_dedupe: RunDedupe) -> None:
     # Checks for an error rather than the absence of one null-filled spelling: the old version of
     # this test also passed if the short row was padded with "" instead of nulls.

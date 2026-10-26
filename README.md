@@ -67,7 +67,8 @@ Each command prints its summary to stderr. For `dedupe-medical`:
 read 30000 rows, wrote 28285 rows (1715 duplicates removed, 0 blank) to output/cleaned_medical_data.csv
 ```
 
-`dedupe-medical` takes no options. The rest of this section describes `dedupe-pharmacy`.
+`dedupe-medical` takes no options. The rest of this section describes `dedupe-pharmacy`, apart
+from [Errors and atomic writes](#errors-and-atomic-writes), which applies to all three commands.
 
 The `dedupe-pharmacy` summary is:
 
@@ -91,14 +92,39 @@ Options:
   `.rejects.csv` next to OUTPUT (`output/cleaned_pharm_data.rejects.csv` above).
 - `--strict` exits with code 3 if any row was rejected. The files are still written.
 
-Missing parent directories of the output and rejects paths are created. Exit codes (`dedupe-medical` uses 0, 1 and 2 only):
+Missing parent directories of the output and rejects paths are created. Exit codes (`dedupe-medical` and `cohort` use 0, 1 and 2 only):
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | Input file not found, header is not the pharmacy schema (medical schema for `dedupe-medical`), or the rejects file is the same file as INPUT or OUTPUT, or OUTPUT is the same file as INPUT |
+| 1 | Any error, printed as one `error:` line (see below) |
 | 2 | Usage error (for example, no subcommand) |
 | 3 | `--strict` and at least one row was rejected |
+
+### Errors and atomic writes
+
+Every command reports a failure as a single `error: ...` line on stderr, exits 1, writes nothing to
+stdout and never prints a traceback. The causes are:
+
+- a missing input file, or a wrong header (for the pharmacy, medical or reference schema);
+- a claims file that is empty, is not valid UTF-8, has a stray quote, or has a row with too many or
+  too few fields (the message names the file and the line, for example
+  `error: short.csv: line 3 has 3 fields, fewer than the 5 columns of the header`);
+- OUTPUT or the rejects path being an existing directory, or the same file as INPUT, including a
+  hard link or symlink to it;
+- anything the operating system refuses: an unreadable input, an OUTPUT in a directory that is not
+  writable, an OUTPUT whose parent is a regular file, a full disk.
+
+A row with fewer fields than the header is an error, not a row of nulls, but a row that ends in
+empty fields (`1,d,5,,`) is fine and keeps its empty values. Blank lines are skipped.
+
+Output files are written atomically. Each is first written to a hidden temp file beside it
+(`.NAME.PID.tmp`) and renamed onto its final name only after every file of the command has been
+written, so a failed run leaves an existing OUTPUT, and any rejects file, exactly as it was and
+leaves no temp files behind. For `dedupe-pharmacy` the clean and rejects files are both written
+before either is renamed. The input is never opened for writing, so an OUTPUT that is a link to
+INPUT cannot truncate it. The rename replaces a symlink or hard link at OUTPUT with a regular file
+and does not write through it.
 
 `python -m drug_effects_for_conditions` is equivalent to the console script.
 
@@ -199,8 +225,10 @@ for years. `--washout-days` reduces this by dropping patients whose first fill i
 start of pharmacy coverage. Medical coverage stops in May 2016, six months before the pharmacy data
 ends, so late first fills (30 on the sample) have no follow-up.
 
-Errors print one `error:` line and exit 1: a missing file, a wrong header, an invalid reference file,
-an unparseable date, a negative `--washout-days`, or OUTPUT being the same file as any input.
+Errors print one `error:` line and exit 1: a missing file, a wrong header, a malformed claims file,
+an invalid reference file, an unparseable date, a negative `--washout-days`, OUTPUT being a
+directory or the same file as any input, or a file system failure. OUTPUT is written atomically (see
+[Errors and atomic writes](#errors-and-atomic-writes)).
 
 ```
 error: input file not found: data/missing.csv
@@ -256,6 +284,12 @@ and `MEDICAL_COLUMNS` (`DIAGNOSIS_COLUMNS` is the four diagnosis columns). Both 
 `ClaimsSchemaError`, which is a `ValueError`; `scan_claims(path, columns)` is the shared reader. `dedupe_ndc_pharm_data` takes an optional third argument,
 the rejects path. `clean_pharmacy` returns a frozen `CleanResult(clean, rejects)`, and
 `duplicates_removed` is `rows_in - blank_rows - rejected - rows_out`.
+
+A claims file that is empty, is not UTF-8 or has a row with the wrong number of fields raises
+`ClaimsFileError` (a `ValueError` naming the file) from `scan_pharmacy` and `scan_medical`, or from
+the dedupe functions for a problem polars finds while reading, such as a stray quote. The dedupe
+functions write atomically, and `write_csv_atomic(frame, path)` does the same for any LazyFrame.
+Other failures, such as an unwritable OUTPUT, stay `OSError`.
 
 The cohort functions take the cleaned frames and the reference frames, and return LazyFrames
 (`summarize` returns a frozen `CohortSummary`):

@@ -9,7 +9,13 @@ from pathlib import Path
 lazy from polars.exceptions import InvalidOperationError
 
 from drug_effects_for_conditions import __version__
-lazy from drug_effects_for_conditions.claims import ClaimsSchemaError, CleanStats
+lazy from drug_effects_for_conditions.claims import (
+    ClaimsFileError,
+    ClaimsSchemaError,
+    CleanStats,
+    file_errors,
+    write_csv_atomic,
+)
 lazy from drug_effects_for_conditions.cohort import CohortSummary, developed_after, summarize
 lazy from drug_effects_for_conditions.medical import (
     clean_medical,
@@ -110,9 +116,19 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+class _CliError(Exception):
+    """A problem to report as `error: <message>` with exit code 1."""
+
+
 def _error(message: str) -> int:
     print(f"error: {message}", file=sys.stderr)
     return 1
+
+
+def _os_message(exc: OSError) -> str:
+    if exc.strerror and exc.filename:
+        return f"{exc.strerror}: {exc.filename}"
+    return exc.strerror or str(exc)
 
 
 def _same_file(a: Path, b: Path) -> bool:
@@ -120,13 +136,14 @@ def _same_file(a: Path, b: Path) -> bool:
     return a.resolve() == b.resolve() or (a.exists() and b.exists() and a.samefile(b))
 
 
-def _check_paths(input_path: Path, output_path: Path) -> str | None:
-    """The error message for unusable INPUT/OUTPUT paths, or None."""
+def _check_paths(input_path: Path, output_path: Path) -> None:
+    """Raise `_CliError` for unusable INPUT/OUTPUT paths."""
     if not input_path.is_file():
-        return f"input file not found: {input_path}"
+        raise _CliError(f"input file not found: {input_path}")
+    if output_path.is_dir():
+        raise _CliError(f"OUTPUT is a directory: {output_path}")
     if _same_file(input_path, output_path):
-        return "OUTPUT must be a different file from INPUT"
-    return None
+        raise _CliError("OUTPUT must be a different file from INPUT")
 
 
 def _summary(stats: CleanStats, output_path: Path, *, rejects: bool) -> str:
@@ -139,20 +156,16 @@ def _summary(stats: CleanStats, output_path: Path, *, rejects: bool) -> str:
 def _dedupe_pharmacy(
     input_path: Path, output_path: Path, rejects_path: Path | None, *, strict: bool
 ) -> int:
-    if message := _check_paths(input_path, output_path):
-        return _error(message)
+    _check_paths(input_path, output_path)
     rejects_path = rejects_path or default_rejects_path(output_path)
+    if rejects_path.is_dir():
+        raise _CliError(f"rejects path is a directory: {rejects_path}")
     for other in (input_path, output_path):
         if _same_file(rejects_path, other):
-            return _error(f"rejects file must be different from {other}")
+            raise _CliError(f"rejects file must be different from {other}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rejects_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
-    except FileNotFoundError:
-        return _error(f"input file not found: {input_path}")
-    except ClaimsSchemaError as exc:
-        return _error(str(exc))
+    stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
     print(_summary(stats, output_path, rejects=True), file=sys.stderr)
     if stats.rejected:
         print(f"wrote {stats.rejected} rejected rows to {rejects_path}", file=sys.stderr)
@@ -162,15 +175,9 @@ def _dedupe_pharmacy(
 
 
 def _dedupe_medical(input_path: Path, output_path: Path) -> int:
-    if message := _check_paths(input_path, output_path):
-        return _error(message)
+    _check_paths(input_path, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        stats = dedupe_medical_data(input_path, output_path)
-    except FileNotFoundError:
-        return _error(f"input file not found: {input_path}")
-    except ClaimsSchemaError as exc:
-        return _error(str(exc))
+    stats = dedupe_medical_data(input_path, output_path)
     print(_summary(stats, output_path, rejects=False), file=sys.stderr)
     return 0
 
@@ -191,49 +198,33 @@ def _cohort_summary(summary: CohortSummary, output_path: Path) -> str:
 
 def _cohort(args: argparse.Namespace) -> int:
     for path in (args.pharmacy, args.medical, args.ndc, args.codes):
-        if message := _check_paths(path, args.output):
-            return _error(message)
+        _check_paths(path, args.output)
     if args.washout_days < 0:
-        return _error("--washout-days must not be negative")
+        raise _CliError("--washout-days must not be negative")
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    try:
+    with file_errors(args.pharmacy, args.medical):
         pharmacy = clean_pharmacy(scan_pharmacy(args.pharmacy)).clean
         medical = clean_medical(scan_medical(args.medical))
         ndc_list = load_ndc_list(args.ndc)
         codes = load_diagnosis_codes(args.codes)
-        incident = not args.include_prevalent
-        # Summarizing first parses every date, so a bad date fails before OUTPUT is written.
-        summary = summarize(
-            pharmacy,
-            medical,
-            ndc_list,
-            codes,
-            incident=incident,
-            same_day_counts=args.same_day,
-            washout_days=args.washout_days,
-        )
-        developed_after(
-            pharmacy,
-            medical,
-            ndc_list,
-            codes,
-            incident=incident,
-            same_day_counts=args.same_day,
-            washout_days=args.washout_days,
-        ).sink_csv(args.output)
-    except FileNotFoundError as exc:
-        return _error(str(exc))
-    except (ClaimsSchemaError, ReferenceFileError) as exc:
-        return _error(str(exc))
-    except InvalidOperationError as exc:
-        return _error(f"cannot parse a date as m/d/yyyy: {str(exc).splitlines()[0]}")
+        options = {
+            "incident": not args.include_prevalent,
+            "same_day_counts": args.same_day,
+            "washout_days": args.washout_days,
+        }
+        try:
+            # Summarizing first parses every date, so a bad date fails before OUTPUT is written.
+            summary = summarize(pharmacy, medical, ndc_list, codes, **options)
+            cohort = developed_after(pharmacy, medical, ndc_list, codes, **options)
+            write_csv_atomic(cohort, args.output)
+        except InvalidOperationError as exc:
+            message = str(exc).splitlines()[0]
+            raise _CliError(f"cannot parse a date as m/d/yyyy: {message}") from exc
     print(_cohort_summary(summary, args.output), file=sys.stderr)
     return 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
-    """Run the CLI and return the process exit code."""
-    args = build_parser().parse_args(argv)
+def _dispatch(args: argparse.Namespace) -> int:
     match args.command:
         case "dedupe-pharmacy":
             return _dedupe_pharmacy(args.input, args.output, args.rejects, strict=args.strict)
@@ -243,3 +234,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _cohort(args)
         case _:  # pragma: no cover - argparse rejects unknown commands
             raise AssertionError(args.command)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """Run the CLI and return the process exit code.
+
+    Every expected failure prints one `error:` line and returns 1.
+    """
+    args = build_parser().parse_args(argv)
+    try:
+        return _dispatch(args)
+    except _CliError as exc:
+        return _error(str(exc))
+    except OSError as exc:
+        return _error(_os_message(exc))
+    except (ClaimsFileError, ClaimsSchemaError, ReferenceFileError) as exc:
+        return _error(str(exc))

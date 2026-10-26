@@ -26,7 +26,7 @@ class ReferenceFileError(ValueError):
 def _load(path: StrPath, column: str, pattern: str, what: str) -> pl.LazyFrame:
     ref = Path(path)
     if not ref.is_file():
-        raise FileNotFoundError(f"No such file: {ref}")
+        raise FileNotFoundError(f"input file not found: {ref}")
     # These files are tiny, so validation collects them; the result is a lazy frame again.
     try:
         raw = pl.scan_csv(ref, has_header=False, schema={column: pl.String}).collect()
