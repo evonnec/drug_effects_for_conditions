@@ -4,7 +4,8 @@ Healthcare claims arrive as two separate record types: medical claims (visits, p
 diagnostics) and pharmacy claims (prescription drugs and therapies). The longer-term goal of this
 project is to find patients who developed a condition `Y` after taking a drug `X`.
 
-This package currently covers the first step: cleaning both kinds of claims. For pharmacy claims
+This package cleans both kinds of claims and then finds that cohort (see
+[Finding the cohort](#finding-the-cohort)). For pharmacy claims
 it removes rows that are exact duplicates, rejects rows whose National Drug Code (NDC) is invalid,
 and normalizes the rest to the 11-digit format. For medical claims it strips the padding from the
 diagnosis codes and removes exact duplicate rows. It is a small Python 3.15 package built on
@@ -57,6 +58,9 @@ uv run drug-effects-for-conditions dedupe-pharmacy data/pharmacy_data_sample.csv
 uv run drug-effects-for-conditions dedupe-medical data/medical_data_sample.csv output/cleaned_medical_data.csv
 ```
 
+The `cohort` command, which needs no cleaned files, is described in [Finding the
+cohort](#finding-the-cohort).
+
 Each command prints its summary to stderr. For `dedupe-medical`:
 
 ```
@@ -107,6 +111,113 @@ pip install dist/drug_effects_for_conditions-0.1.0-py3-none-any.whl
 
 Each GitHub Release includes the wheel and sdist as downloads.
 
+## Finding the cohort
+
+`cohort` finds the patients who developed condition `Y` after taking drug `X`. It cleans both
+claims files in memory (no intermediate files), writes one row per qualifying patient to OUTPUT
+and prints the counts to stderr. stdout stays empty.
+
+```
+uv run drug-effects-for-conditions cohort --pharmacy data/pharmacy_data_sample.csv --medical data/medical_data_sample.csv --ndc data/ndc.csv --codes data/diagnosis_code.csv output/cohort.csv
+```
+
+```
+drug X patients:         759
+condition Y patients:   3828
+both:                    538
+excluded by washout:       0
+qualifying:              456
+no follow-up:             30
+wrote 456 rows to output/cohort.csv
+```
+
+`output/cohort.csv` has the columns `Patient_ID`, `first_x`, `first_y_after` and `days_to_y`,
+sorted by `Patient_ID`. Dates are written as ISO `yyyy-mm-dd`:
+
+```
+Patient_ID,first_x,first_y_after,days_to_y
+1000,2016-02-26,2016-05-04,68
+1013,2016-02-04,2016-05-04,90
+1029,2016-01-28,2016-04-22,85
+```
+
+### Definition
+
+- **Drug X patient**: has a cleaned pharmacy fill whose NDC is in the `--ndc` list. The index date
+  is their first such fill (`Date_Submitted`).
+- **Condition Y claim**: a cleaned medical claim with a `--codes` code in any of the four
+  `Diagnosis_Code_*` columns, dated by `Service_Date`. Several codes on one claim, or duplicate
+  claims, are one event.
+- **Qualifying patient**: a drug X patient with a Y claim after the index date. Each choice is a
+  parameter:
+
+| CLI flag | Library argument | Default | Effect |
+| --- | --- | --- | --- |
+| `--include-prevalent` | `incident=False` | incident | By default a patient with any Y claim on or before the index date (strictly before with `--same-day`) is excluded. The flag drops that rule: any Y after X counts. |
+| `--same-day` | `same_day_counts=True` | off | Y must be strictly after the index date (`>`). With the flag, a Y on the index date counts (`>=`). |
+| `--washout-days N` | `washout_days=N` | 0 | Keep only patients whose first X is at least N days after the earliest `Date_Submitted` in the pharmacy data. |
+
+`first_y_after` is the earliest qualifying Y claim, and `days_to_y` is `first_y_after - first_x`.
+Counts on the sample:
+
+| Options | Qualifying |
+| --- | --- |
+| defaults | 456 |
+| `--include-prevalent` | 478 |
+| `--same-day` | 464 |
+| `--include-prevalent --same-day` | 487 |
+| `--washout-days 90` | 55 |
+
+Each side is reduced to one row per patient (first X date, distinct Y dates) before the two are
+joined, so fill rows are never joined to claim rows. Because only first dates matter, the
+patient set is the same whether or not the inputs were de-duplicated; the CLI de-duplicates anyway.
+
+Dates must be `m/d/yyyy` (a leading zero is fine, a two-digit year is not). They are parsed strictly:
+an unparseable date in any row of either claims file, drug X or not, is an error and never a missing
+value. A row with an empty date is ignored.
+
+The summary lines mean:
+
+- `drug X patients`: patients with any drug X fill. `condition Y patients`: patients with any Y
+  claim. `both`: patients with each, in any order.
+- `excluded by washout`: drug X patients dropped by `--washout-days`.
+- `qualifying`: rows written.
+- `no follow-up`: patients still eligible after the washout whose first X fill is after the last
+  `Service_Date` in the medical data, so no Y could have been observed for them.
+
+`--washout-days 90` on the sample prints `excluded by washout: 632` and `qualifying: 55`, out of 127
+patients whose first X is on or after 2016-01-27.
+
+### Data coverage caveats
+
+The two sample files cover different periods: medical claims run from 2013-07-09 to 2016-05-19 and
+pharmacy claims from 2015-10-29 to 2016-11-24. Pharmacy coverage starts late, so a patient's first
+X fill in the data is often not their first ever. 424 of the 759 first fills are in the first 31
+days of pharmacy coverage and 632 are before 2016-01-27. Without a washout, those patients count as
+new users, and Y events in the months after them look like effects of a drug they may have taken
+for years. `--washout-days` reduces this by dropping patients whose first fill is too close to the
+start of pharmacy coverage. Medical coverage stops in May 2016, six months before the pharmacy data
+ends, so late first fills (30 on the sample) have no follow-up.
+
+Errors print one `error:` line and exit 1: a missing file, a wrong header, an invalid reference file,
+an unparseable date, a negative `--washout-days`, or OUTPUT being the same file as any input.
+
+```
+error: input file not found: data/missing.csv
+error: bad_ndc.csv: 1 invalid NDCs (expected ^[0-9]{11}$), for example '1234567890'
+```
+
+### Reference files
+
+`ndc.csv` and `diagnosis_code.csv` are headerless. `load_ndc_list` and `load_diagnosis_codes`
+read them as strings (so leading zeros survive), strip whitespace and keep distinct values in file
+order. CRLF line endings and a missing final newline are fine. Each returns a LazyFrame with one
+column, `NDC` or `Diagnosis_Code`. They raise `ReferenceFileError` (a `ValueError`, naming the
+file and a sample of the bad values) when an NDC is not exactly 11 digits, when a code is not 3 to 7
+characters of `0-9` and `A-Z`, or when the file is empty or has blank lines. A missing file raises
+`FileNotFoundError`. The file is read once to validate it, which is fine for files this small.
+`data/ndc.csv` gives 404 NDCs (166 starting with `0`) and `data/diagnosis_code.csv` gives 146 codes.
+
 ## Library use
 
 ```python
@@ -146,6 +257,39 @@ and `MEDICAL_COLUMNS` (`DIAGNOSIS_COLUMNS` is the four diagnosis columns). Both 
 the rejects path. `clean_pharmacy` returns a frozen `CleanResult(clean, rejects)`, and
 `duplicates_removed` is `rows_in - blank_rows - rejected - rows_out`.
 
+The cohort functions take the cleaned frames and the reference frames, and return LazyFrames
+(`summarize` returns a frozen `CohortSummary`):
+
+```python
+from drug_effects_for_conditions import (
+    clean_medical,
+    clean_pharmacy,
+    developed_after,
+    load_diagnosis_codes,
+    load_ndc_list,
+    scan_medical,
+    scan_pharmacy,
+    summarize,
+)
+
+pharmacy = clean_pharmacy(scan_pharmacy("data/pharmacy_data_sample.csv")).clean
+medical = clean_medical(scan_medical("data/medical_data_sample.csv"))
+ndc_list = load_ndc_list("data/ndc.csv")
+codes = load_diagnosis_codes("data/diagnosis_code.csv")
+
+cohort = developed_after(
+    pharmacy, medical, ndc_list, codes, incident=True, same_day_counts=False, washout_days=0
+)
+print(cohort.collect().height)  # 456
+print(summarize(pharmacy, medical, ndc_list, codes))
+```
+
+`first_exposure(pharmacy, ndc_list)` returns `Patient_ID` and `first_x`, `condition_events(medical,
+codes)` returns distinct `Patient_ID` and `event_date`, and `match_ndc(pharmacy, ndc_list)` is the
+semi join of pharmacy rows on `NDC`. `CohortSummary` has `drug_x`, `condition_y`, `both`,
+`washout_excluded`, `eligible`, `qualifying` and `no_followup`. A date that is not `m/d/yyyy` raises
+a polars `InvalidOperationError` when the frame is collected.
+
 `normalize_ndc` (plain strings) and `normalize_ndc_expr` (polars expression) only normalize and
 never validate. Validity is separate: `is_valid_ndc` (plain strings) and `ndc_is_valid_expr`
 (polars expression) agree on every input.
@@ -159,9 +303,11 @@ never validate. Validity is separate: `is_valid_ndc` (plain strings) and `ndc_is
 │   ├── __main__.py     python -m entry point
 │   ├── claims.py       shared scan, blank-row and stats helpers
 │   ├── cli.py          argparse CLI
+│   ├── cohort.py       drug X then condition Y cohort and its counts
 │   ├── medical.py      scan, clean and de-duplicate medical CSVs
 │   ├── ndc.py          NDC normalization and validation
-│   └── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
+│   ├── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
+│   └── reference.py    load the NDC and diagnosis-code lists, match NDCs
 ├── tests/              pytest and hypothesis tests
 ├── data/               synthetic sample files
 ├── docs/               design notes
