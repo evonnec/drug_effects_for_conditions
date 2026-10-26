@@ -31,6 +31,12 @@ from drug_effects_for_conditions.pharmacy import (
     dedupe_ndc_pharm_data,
     scan_pharmacy,
 )
+from drug_effects_for_conditions.reference import (
+    ReferenceFileError,
+    load_diagnosis_codes,
+    load_ndc_list,
+    match_ndc,
+)
 
 # Running from a source tree without an install (PYTHONPATH=src) has no package metadata.
 try:
@@ -48,6 +54,7 @@ __all__ = [
     "CleanStats",
     "MedicalSchemaError",
     "PharmacySchemaError",
+    "ReferenceFileError",
     "StrPath",
     "__version__",
     "clean_medical",
@@ -55,6 +62,9 @@ __all__ = [
     "dedupe_medical_data",
     "dedupe_ndc_pharm_data",
     "is_valid_ndc",
+    "load_diagnosis_codes",
+    "load_ndc_list",
+    "match_ndc",
     "ndc_is_valid_expr",
     "normalize_ndc",
     "normalize_ndc_expr",
