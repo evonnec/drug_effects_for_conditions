@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -58,6 +59,16 @@ def test_same_input_and_output(tmp_path: Path, capsys: pytest.CaptureFixture[str
     before = src.read_bytes()
     alias = tmp_path / "." / "in.csv"
     assert cli.main(["dedupe-pharmacy", str(src), str(alias)]) == 1
+    assert capsys.readouterr().err.startswith("error: ")
+    assert src.read_bytes() == before
+
+
+def test_hard_link_to_input_is_rejected(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = write_csv(tmp_path / "in.csv")
+    before = src.read_bytes()
+    link = tmp_path / "link.csv"
+    os.link(src, link)
+    assert cli.main(["dedupe-pharmacy", str(src), str(link)]) == 1
     assert capsys.readouterr().err.startswith("error: ")
     assert src.read_bytes() == before
 
