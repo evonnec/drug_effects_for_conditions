@@ -93,7 +93,7 @@ OUTPUT_CASES = [
         "empty_and_quoted_empty_amounts_are_duplicates",
         HDR + b'\n1,d,5,,2\n1,d,5,"",2\n',
         HDR + b"\n1,d,00000000005,,2\n",
-        pytest.mark.xfail(strict=True, reason='untracked: bare empty and "" fields not deduped'),
+        pytest.mark.xfail(strict=True, reason='#19: bare empty and "" fields not deduped'),
     ),
 ]
 
