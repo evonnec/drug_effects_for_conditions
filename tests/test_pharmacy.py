@@ -98,15 +98,39 @@ def test_header_only(write_csv: WriteCsv, tmp_path: Path) -> None:
     assert read_rows(out) == [list(PHARMACY_COLUMNS)]
 
 
+SAMPLE = Path(__file__).parents[1] / "data" / "pharmacy_data_sample.csv"
+# Output of the original stdlib-csv implementation on the sample (no header, set order).
+LEGACY = Path(__file__).parent / "fixtures" / "legacy_cleaned_pharm_data.csv"
+
+
 def test_sample_parity(tmp_path: Path) -> None:
-    sample = Path(__file__).parents[1] / "data" / "pharmacy_data_sample.csv"
-    # Output of the original stdlib-csv implementation on the sample (no header, set order).
-    old = Path(__file__).parent / "fixtures" / "legacy_cleaned_pharm_data.csv"
-    if not sample.is_file():
+    # Pins today's output, including the three invalid-NDC rows; the #7 fix replaces it with
+    # test_sample_after_rejecting_invalid_ndcs below.
+    if not SAMPLE.is_file():
         pytest.skip("sample data missing")
     out = tmp_path / "out.csv"
-    stats = dedupe_ndc_pharm_data(sample, out)
+    stats = dedupe_ndc_pharm_data(SAMPLE, out)
     new_rows = {tuple(r) for r in read_rows(out)[1:]}
-    old_rows = {tuple(r) for r in read_rows(old)}
+    old_rows = {tuple(r) for r in read_rows(LEGACY)}
     assert new_rows == old_rows
     assert stats.rows_out == len(new_rows) == 30_097
+
+
+@pytest.mark.xfail(strict=True, raises=AttributeError, reason="#7: invalid NDCs are not rejected")
+def test_sample_after_rejecting_invalid_ndcs(tmp_path: Path) -> None:
+    if not SAMPLE.is_file():
+        pytest.skip("sample data missing")
+    out = tmp_path / "out.csv"
+    stats = dedupe_ndc_pharm_data(SAMPLE, out)
+    rejected = stats.rejected  # type: ignore[attr-defined]
+    assert (stats.rows_in, rejected, stats.rows_out, stats.duplicates_removed) == (
+        32_932,
+        3,
+        30_094,
+        2_835,
+    )
+    # Exactly the legacy rows minus patient 1488's three `0    -    -  ` claims, nothing else.
+    invalid = {r for r in map(tuple, read_rows(LEGACY)) if r[0] == "1488" and r[2].strip() == "0"}
+    assert len(invalid) == 3
+    expected = {tuple(r) for r in read_rows(LEGACY)} - invalid
+    assert {tuple(r) for r in read_rows(out)[1:]} == expected

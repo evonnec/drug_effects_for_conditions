@@ -32,6 +32,19 @@ def test_expr_matches_function(s: str) -> None:
     assert frame.select(normalize_ndc_expr()).item() == normalize_ndc(s)
 
 
+@given(st.text(max_size=15))
+def test_expr_matches_function_on_any_text(s: str) -> None:
+    # Both must pad by characters, not bytes, or they disagree on non-ASCII input.
+    frame = pl.DataFrame({"NDC": [s]}, schema={"NDC": pl.String})
+    assert frame.select(normalize_ndc_expr()).item() == normalize_ndc(s)
+
+
+def test_expr_accepts_an_expression() -> None:
+    frame = pl.DataFrame({"raw": ["1-2", "00591-0845-10"]})
+    got = frame.select(normalize_ndc_expr(pl.col("raw").str.strip_chars())).to_series()
+    assert got.to_list() == ["00000000012", "00591084510"]
+
+
 @given(ndc_text)
 def test_idempotent(s: str) -> None:
     once = normalize_ndc(s)
