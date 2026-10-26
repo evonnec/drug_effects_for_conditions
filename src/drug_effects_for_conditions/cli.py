@@ -8,9 +8,14 @@ from pathlib import Path
 from drug_effects_for_conditions import __version__
 
 # Lazy so `--help` and `--version` don't pay for importing polars.
-lazy from drug_effects_for_conditions.pharmacy import PharmacySchemaError, dedupe_ndc_pharm_data
+lazy from drug_effects_for_conditions.pharmacy import (
+    PharmacySchemaError,
+    dedupe_ndc_pharm_data,
+    default_rejects_path,
+)
 
 PROG = "drug-effects-for-conditions"
+EXIT_REJECTED = 3  # --strict and at least one row rejected; 2 is argparse's usage error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,10 +31,24 @@ def build_parser() -> argparse.ArgumentParser:
     dedupe = sub.add_parser(
         "dedupe-pharmacy",
         help="normalize NDCs and de-duplicate a pharmacy claims CSV",
-        description="Normalize NDCs to 11 digits and drop exact-duplicate pharmacy claim rows.",
+        description=(
+            "Normalize NDCs to 11 digits and drop exact-duplicate pharmacy claim rows. "
+            "Rows with an invalid NDC are written to a rejects file instead."
+        ),
     )
     dedupe.add_argument("input", metavar="INPUT", type=Path, help="pharmacy claims CSV to read")
     dedupe.add_argument("output", metavar="OUTPUT", type=Path, help="CSV file to write")
+    dedupe.add_argument(
+        "--rejects",
+        metavar="PATH",
+        type=Path,
+        help="CSV file for rows with an invalid NDC (default: OUTPUT stem + .rejects.csv)",
+    )
+    dedupe.add_argument(
+        "--strict",
+        action="store_true",
+        help=f"exit with code {EXIT_REJECTED} if any row was rejected",
+    )
     return parser
 
 
@@ -38,7 +57,9 @@ def _error(message: str) -> int:
     return 1
 
 
-def _dedupe_pharmacy(input_path: Path, output_path: Path) -> int:
+def _dedupe_pharmacy(
+    input_path: Path, output_path: Path, rejects_path: Path | None, *, strict: bool
+) -> int:
     if not input_path.is_file():
         return _error(f"input file not found: {input_path}")
     # resolve() catches a not-yet-existing output; samefile() catches hard links.
@@ -46,18 +67,30 @@ def _dedupe_pharmacy(input_path: Path, output_path: Path) -> int:
         output_path.exists() and input_path.samefile(output_path)
     ):
         return _error("OUTPUT must be a different file from INPUT")
+    rejects_path = rejects_path or default_rejects_path(output_path)
+    for other in (input_path, output_path):
+        if rejects_path.resolve() == other.resolve() or (
+            rejects_path.exists() and other.exists() and rejects_path.samefile(other)
+        ):
+            return _error(f"rejects file must be different from {other}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    rejects_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        stats = dedupe_ndc_pharm_data(input_path, output_path)
+        stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
     except FileNotFoundError:
         return _error(f"input file not found: {input_path}")
     except PharmacySchemaError as exc:
         return _error(str(exc))
     print(
         f"read {stats.rows_in} rows, wrote {stats.rows_out} rows "
-        f"({stats.duplicates_removed} duplicates removed) to {output_path}",
+        f"({stats.duplicates_removed} duplicates removed, {stats.blank_rows} blank, "
+        f"{stats.rejected} rejected) to {output_path}",
         file=sys.stderr,
     )
+    if stats.rejected:
+        print(f"wrote {stats.rejected} rejected rows to {rejects_path}", file=sys.stderr)
+        if strict:
+            return EXIT_REJECTED
     return 0
 
 
@@ -66,6 +99,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     match args.command:
         case "dedupe-pharmacy":
-            return _dedupe_pharmacy(args.input, args.output)
+            return _dedupe_pharmacy(args.input, args.output, args.rejects, strict=args.strict)
         case _:  # pragma: no cover - argparse rejects unknown commands
             raise AssertionError(args.command)

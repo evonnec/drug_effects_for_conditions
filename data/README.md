@@ -5,7 +5,8 @@ with a final newline.
 
 ## pharmacy_data_sample.csv
 
-Pharmacy claims, with a header row. 32,932 data rows, 30,097 of them distinct.
+Pharmacy claims, with a header row. 32,932 data rows, 30,097 of them distinct. Three rows (patient 1488, NDC `0    -    -  `)
+have an invalid NDC, so cleaning writes 30,094 rows and rejects 3.
 
 Columns: `Patient_ID`, `Date_Submitted`, `NDC`, `Amount_Billed`, `Amount_Paid`.
 

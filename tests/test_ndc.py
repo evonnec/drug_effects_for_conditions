@@ -5,6 +5,9 @@ from hypothesis import strategies as st
 
 from drug_effects_for_conditions.ndc import (
     NDC_LENGTH,
+    is_valid_ndc,
+    ndc_invalid_reason_expr,
+    ndc_is_valid_expr,
     normalize_ndc,
     normalize_ndc_expr,
 )
@@ -54,3 +57,43 @@ def test_idempotent(s: str) -> None:
 @given(ndc_text)
 def test_length(s: str) -> None:
     assert len(normalize_ndc(s)) == max(NDC_LENGTH, len(s.replace("-", "")))
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("00591-0845-10", True),
+        ("7", True),
+        ("-5", True),
+        ("12345678901", True),
+        ("123456789012", False),
+        ("0", False),
+        ("00000-0000-00", False),
+        ("", False),
+        ("--", False),
+        (" 2322730", False),
+        ("ABC", False),
+        ("١٢", False),
+        (None, False),
+    ],
+)
+def test_is_valid_ndc_examples(raw: str | None, expected: bool) -> None:
+    assert is_valid_ndc(raw) is expected
+
+
+@given(st.one_of(st.none(), ndc_text, st.text(max_size=15)))
+def test_valid_expr_matches_function(s: str | None) -> None:
+    frame = pl.DataFrame({"NDC": [s]}, schema={"NDC": pl.String})
+    assert frame.select(ndc_is_valid_expr()).item() is is_valid_ndc(s)
+
+
+@given(st.one_of(st.none(), ndc_text, st.text(max_size=15)))
+def test_reason_is_set_exactly_when_invalid(s: str | None) -> None:
+    frame = pl.DataFrame({"NDC": [s]}, schema={"NDC": pl.String})
+    reason = frame.select(ndc_invalid_reason_expr()).item()
+    assert (reason is None) == is_valid_ndc(s)
+
+
+@given(ndc_text.filter(is_valid_ndc))
+def test_valid_ndcs_normalize_to_11_digits(s: str) -> None:
+    assert len(normalize_ndc(s)) == NDC_LENGTH

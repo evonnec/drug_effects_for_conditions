@@ -86,7 +86,7 @@ def test_missing_file(tmp_path: Path) -> None:
 def test_stats(write_csv: WriteCsv, tmp_path: Path) -> None:
     src = write_csv(["1,d,1,1,1", "1,d,1,1,1", "2,d,2,1,1"])
     stats = dedupe_ndc_pharm_data(src, tmp_path / "out.csv")
-    assert stats == CleanStats(rows_in=3, rows_out=2)
+    assert stats == CleanStats(rows_in=3, rows_out=2, blank_rows=0, rejected=0)
     assert stats.duplicates_removed == 1
 
 
@@ -104,26 +104,23 @@ LEGACY = Path(__file__).parent / "fixtures" / "legacy_cleaned_pharm_data.csv"
 
 
 def test_sample_parity(tmp_path: Path) -> None:
-    # Pins today's output, including the three invalid-NDC rows; the #7 fix replaces it with
-    # test_sample_after_rejecting_invalid_ndcs below.
+    # The legacy output minus patient 1488's three invalid-NDC claims (see the test below).
     if not SAMPLE.is_file():
         pytest.skip("sample data missing")
     out = tmp_path / "out.csv"
     stats = dedupe_ndc_pharm_data(SAMPLE, out)
     new_rows = {tuple(r) for r in read_rows(out)[1:]}
-    old_rows = {tuple(r) for r in read_rows(LEGACY)}
+    old_rows = {tuple(r) for r in read_rows(LEGACY) if not (r[0] == "1488" and r[2].strip() == "0")}
     assert new_rows == old_rows
-    assert stats.rows_out == len(new_rows) == 30_097
+    assert stats.rows_out == len(new_rows) == 30_094
 
 
-@pytest.mark.xfail(strict=True, raises=AttributeError, reason="#7: invalid NDCs are not rejected")
 def test_sample_after_rejecting_invalid_ndcs(tmp_path: Path) -> None:
     if not SAMPLE.is_file():
         pytest.skip("sample data missing")
     out = tmp_path / "out.csv"
     stats = dedupe_ndc_pharm_data(SAMPLE, out)
-    rejected = stats.rejected  # type: ignore[attr-defined]
-    assert (stats.rows_in, rejected, stats.rows_out, stats.duplicates_removed) == (
+    assert (stats.rows_in, stats.rejected, stats.rows_out, stats.duplicates_removed) == (
         32_932,
         3,
         30_094,

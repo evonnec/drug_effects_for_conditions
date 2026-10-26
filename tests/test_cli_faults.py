@@ -57,13 +57,16 @@ def test_cli_passes_paths_to_library_and_reports_on_stderr(
 ) -> None:
     # Patch the name where cli.py looks it up (its own lazy-imported global), not in pharmacy.
     out = tmp_path / "out.csv"
-    fake = mock.Mock(return_value=CleanStats(rows_in=5, rows_out=3))
+    fake = mock.Mock(return_value=CleanStats(rows_in=7, rows_out=3, blank_rows=1, rejected=1))
     monkeypatch.setattr(cli, "dedupe_ndc_pharm_data", fake)
     assert run_cli(src, out) == 0
-    fake.assert_called_once_with(src, out)
+    fake.assert_called_once_with(src, out, tmp_path / "out.rejects.csv")
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == f"read 5 rows, wrote 3 rows (2 duplicates removed) to {out}\n"
+    assert captured.err == (
+        f"read 7 rows, wrote 3 rows (2 duplicates removed, 1 blank, 1 rejected) to {out}\n"
+        f"wrote 1 rejected rows to {tmp_path / 'out.rejects.csv'}\n"
+    )
 
 
 def test_cli_does_not_call_library_when_input_is_missing(
@@ -82,9 +85,9 @@ def test_input_deleted_after_the_check_is_reported_as_missing(
 ) -> None:
     # The CLI checks INPUT before reading it; if the file disappears in between, the library's
     # FileNotFoundError must still become a clean error.
-    def delete_then_run(input_path: Path, output_path: Path) -> CleanStats:
+    def delete_then_run(input_path: Path, output_path: Path, rejects_path: Path) -> CleanStats:
         input_path.unlink()
-        return dedupe_ndc_pharm_data(input_path, output_path)
+        return dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
 
     spy = mock.Mock(side_effect=delete_then_run)
     monkeypatch.setattr(cli, "dedupe_ndc_pharm_data", spy)
@@ -254,7 +257,6 @@ def test_existing_output_survives_failed_sink(
     assert files_in(tmp_path) == ["in.csv", "out.csv"]
 
 
-@XFAIL_9_ATOMIC
 def test_existing_output_survives_malformed_input(src: Path, tmp_path: Path) -> None:
     # Passes for any fix that leaves OUTPUT alone, including one that validates before writing.
     # Only the failed-sink tests need a real temp-file-and-replace.

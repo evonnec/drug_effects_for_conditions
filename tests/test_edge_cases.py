@@ -22,15 +22,6 @@ ROW = b"1,2020-01-01,00002322730,1.00,2.00\n"
 # *how* a case fails, then shows up as a real failure instead of hiding behind the marker. For the
 # #9 cases this also guards today's behavior: a "fix" such as `truncate_ragged_lines=True` or
 # `encoding="utf8-lossy"` turns the polars error into a silent success, and the test fails loudly.
-XFAIL_7_BLANK = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="#7: blank lines become ,,,, rows"
-)
-XFAIL_7_NDC = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="#7: invalid NDC passes through, not rejected"
-)
-XFAIL_19 = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason='#19: bare empty and "" fields not deduped'
-)
 
 
 def _case(
@@ -45,7 +36,7 @@ def _ndc_row(ndc: bytes) -> bytes:
 
 def _bad_ndc(name: str, ndc: bytes) -> object:
     """#7: a row whose NDC is invalid is removed from the clean output."""
-    return _case(name, _ndc_row(ndc), HDR + b"\n", XFAIL_7_NDC)
+    return _case(name, _ndc_row(ndc), HDR + b"\n")
 
 
 def _good_ndc(name: str, ndc: bytes, normalized: bytes) -> object:
@@ -102,13 +93,11 @@ OUTPUT_CASES = [
         "trailing_blank_line",
         HDR + b"\n" + ROW + b"\n",
         HDR + b"\n" + ROW,
-        XFAIL_7_BLANK,
     ),
     _case(
         "blank_lines_between_rows",
         HDR + b"\n" + ROW + b"\n\n" + ROW.replace(b"1,", b"2,", 1),
         HDR + b"\n" + ROW + ROW.replace(b"1,", b"2,", 1),
-        XFAIL_7_BLANK,
     ),
     # #7 boundaries that must stay valid: 1 and 11 digits once dashes are removed.
     _good_ndc("one_digit_ndc_is_valid", b"7", b"00000000007"),
@@ -135,13 +124,11 @@ OUTPUT_CASES = [
         "valid_row_survives_next_to_invalid",
         HDR + b"\n" + ROW + b"1,2020-01-01,ABC,1.00,2.00\n",
         HDR + b"\n" + ROW,
-        XFAIL_7_NDC,
     ),
     _case(
         "empty_and_quoted_empty_amounts_are_duplicates",
         HDR + b'\n1,d,5,,2\n1,d,5,"",2\n',
         HDR + b"\n1,d,00000000005,,2\n",
-        XFAIL_19,
     ),
 ]
 
@@ -176,28 +163,24 @@ def test_output_has_exactly_the_five_header_columns(
 INVALID_ROWS = HDR + b"\n" + ROW + b"2,d,ABC,1,2\n3,d,,1,2\n" + ROW
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#7: blank lines become ,,,, rows")
 def test_blank_lines_are_counted_separately_not_as_duplicates(run_dedupe: RunDedupe) -> None:
     # One blank line between the two rows and one trailing blank line.
     stats, _ = run_dedupe(HDR + b"\n" + ROW + b"\n" + ROW.replace(b"1,", b"2,", 1) + b"\n")
     assert stats.duplicates_removed == 0
     assert stats.rows_out == 2
-    assert getattr(stats, "blank_rows", None) == 2
+    assert stats.blank_rows == 2
 
 
-@pytest.mark.xfail(strict=True, raises=AttributeError, reason="#7: no rejected count in stats")
 def test_stats_count_rejected_rows(run_dedupe: RunDedupe) -> None:
     stats, _ = run_dedupe(INVALID_ROWS)
-    rejected = stats.rejected  # type: ignore[attr-defined]
-    assert (rejected, stats.rows_out, stats.duplicates_removed) == (2, 1, 1)
+    assert (stats.rejected, stats.rows_out, stats.duplicates_removed) == (2, 1, 1)
 
 
-@pytest.mark.xfail(strict=True, raises=AttributeError, reason="#7: clean_pharmacy has no rejects")
 def test_clean_pharmacy_returns_clean_and_rejects(tmp_path: Path) -> None:
     src = tmp_path / "in.csv"
     src.write_bytes(INVALID_ROWS)
     result = clean_pharmacy(scan_pharmacy(src))
-    clean, rejects = result.clean.collect(), result.rejects.collect()  # type: ignore[attr-defined]
+    clean, rejects = result.clean.collect(), result.rejects.collect()
     assert clean["Patient_ID"].to_list() == ["1"]
     assert rejects["Patient_ID"].to_list() == ["2", "3"]
 
@@ -208,7 +191,6 @@ def _rejects_rows(path: Path) -> list[list[str]]:
     return rows[1:]
 
 
-@pytest.mark.xfail(strict=True, raises=AssertionError, reason="#7: invalid rows are not split off")
 def test_cli_writes_rejects_next_to_output_by_default(tmp_path: Path) -> None:
     src, out = tmp_path / "in.csv", tmp_path / "clean.csv"
     src.write_bytes(INVALID_ROWS)
@@ -219,7 +201,6 @@ def test_cli_writes_rejects_next_to_output_by_default(tmp_path: Path) -> None:
     assert [row[0] for row in _rejects_rows(rejects)] == ["2", "3"]
 
 
-@pytest.mark.xfail(strict=True, raises=SystemExit, reason="#7: no --rejects option")
 def test_cli_rejects_option_sets_the_path(tmp_path: Path) -> None:
     src, out, rejects = tmp_path / "in.csv", tmp_path / "clean.csv", tmp_path / "r.csv"
     src.write_bytes(INVALID_ROWS)

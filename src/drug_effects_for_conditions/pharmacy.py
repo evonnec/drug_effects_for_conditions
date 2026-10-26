@@ -7,7 +7,11 @@ from typing import Final
 
 lazy import polars as pl
 
-from drug_effects_for_conditions.ndc import normalize_ndc_expr
+from drug_effects_for_conditions.ndc import (
+    ndc_invalid_reason_expr,
+    ndc_is_valid_expr,
+    normalize_ndc_expr,
+)
 
 PHARMACY_COLUMNS: Final = (
     "Patient_ID",
@@ -18,6 +22,8 @@ PHARMACY_COLUMNS: Final = (
 )
 
 type StrPath = str | os.PathLike[str]
+# An alias, not `pl.LazyFrame` inline: the dataclass below would resolve that and import polars.
+type Lazy = pl.LazyFrame
 
 
 class PharmacySchemaError(ValueError):
@@ -28,10 +34,20 @@ class PharmacySchemaError(ValueError):
 class CleanStats:
     rows_in: int
     rows_out: int
+    blank_rows: int = 0
+    rejected: int = 0
 
     @property
     def duplicates_removed(self) -> int:
-        return self.rows_in - self.rows_out
+        return self.rows_in - self.blank_rows - self.rejected - self.rows_out
+
+
+@dataclass(frozen=True, slots=True)
+class CleanResult:
+    """Lazy outputs of `clean_pharmacy`: `rejects` has the input columns plus `reason`."""
+
+    clean: Lazy
+    rejects: Lazy
 
 
 def scan_pharmacy(path: StrPath) -> pl.LazyFrame:
@@ -45,16 +61,52 @@ def scan_pharmacy(path: StrPath) -> pl.LazyFrame:
     return pl.scan_csv(csv_path, schema=dict.fromkeys(PHARMACY_COLUMNS, pl.String))
 
 
-def clean_pharmacy(frame: pl.LazyFrame) -> pl.LazyFrame:
-    """Normalize NDCs, then drop duplicate rows, keeping first occurrences."""
-    return frame.with_columns(normalize_ndc_expr("NDC")).unique(maintain_order=True)
+def _empty_to_null(frame: pl.LazyFrame) -> pl.LazyFrame:
+    # polars reads a bare empty field as null but a quoted one ("") as "": make them one value.
+    return frame.with_columns(pl.all().replace("", None))
 
 
-def dedupe_ndc_pharm_data(input_path: StrPath, output_path: StrPath) -> CleanStats:
-    """Clean `input_path` and write the result, with a header, to `output_path`."""
-    frame = scan_pharmacy(input_path)
-    rows_in = frame.select(pl.len()).collect().item()
+def _is_blank_expr() -> pl.Expr:
+    return pl.all_horizontal(pl.all().str.strip_chars().fill_null("") == "")
+
+
+def clean_pharmacy(frame: pl.LazyFrame) -> CleanResult:
+    """Drop blank rows, split off invalid NDCs, normalize the rest and drop duplicates.
+
+    Duplicates are dropped after normalization, keeping first occurrences.
+    """
+    frame = _empty_to_null(frame).filter(~_is_blank_expr())
+    valid = ndc_is_valid_expr("NDC")
+    clean = frame.filter(valid).with_columns(normalize_ndc_expr("NDC")).unique(maintain_order=True)
+    rejects = frame.filter(~valid).with_columns(ndc_invalid_reason_expr("NDC").alias("reason"))
+    return CleanResult(clean=clean, rejects=rejects)
+
+
+def dedupe_ndc_pharm_data(
+    input_path: StrPath, output_path: StrPath, rejects_path: StrPath | None = None
+) -> CleanStats:
+    """Clean `input_path`; write the result to `output_path` and invalid rows to `rejects_path`.
+
+    Both files get a header. `rejects_path` defaults to `<output stem>.rejects.csv` next to the
+    output.
+    """
     out = Path(output_path)
-    clean_pharmacy(frame).sink_csv(out)
+    rejects_out = Path(rejects_path) if rejects_path is not None else default_rejects_path(out)
+    frame = _empty_to_null(scan_pharmacy(input_path))
+    result = clean_pharmacy(frame)
+    result.clean.sink_csv(out)
+    result.rejects.sink_csv(rejects_out)
     rows_out = pl.scan_csv(out, infer_schema=False).select(pl.len()).collect().item()
-    return CleanStats(rows_in=rows_in, rows_out=rows_out)
+    blank = _is_blank_expr()
+    counts = frame.select(
+        pl.len().alias("rows_in"),
+        blank.sum().alias("blank_rows"),
+        (~blank & ~ndc_is_valid_expr("NDC")).sum().alias("rejected"),
+    ).collect()
+    return CleanStats(rows_out=rows_out, **counts.row(0, named=True))
+
+
+def default_rejects_path(output_path: StrPath) -> Path:
+    """`out/clean.csv` -> `out/clean.rejects.csv`."""
+    out = Path(output_path)
+    return out.with_name(f"{out.stem}.rejects.csv")
