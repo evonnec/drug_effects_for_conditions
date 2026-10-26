@@ -109,11 +109,57 @@ mypy, which helps correctness, not performance.
 
 The limit is `unique`. To know whether a row has been seen, it must remember every distinct row,
 so memory grows with the number of distinct rows. That is fine for tens of millions of rows on a
-typical machine and fails when the distinct rows exceed memory. The script also reads the input
-twice (once to count rows, once to run the plan) and the output once more to count what was
-written.
+typical machine and fails when the distinct rows exceed memory. Row counts for the summary come
+from the same run as the write (`pl.collect_all` over lazy sinks and count queries that share one
+plan), so neither the input nor the output is read again to count.
+
+### Implemented: `buckets` and `keep_order`
+
+`dedupe_ndc_pharm_data` and `dedupe_medical_data` (and the `--buckets N` / `--keep-order` CLI
+options) implement the design below with polars, in `claims.write_unique_csv`, shared by both
+cleaners:
+
+1. Stage: the rows after the blank filter, NDC normalization (pharmacy) or code stripping
+   (medical) get a `_row` index and a bucket `hash(whole row) % N`, and are written with
+   `sink_parquet(pl.PartitionBy(..., key="_bucket"), row_group_size=8192)` to a scratch directory
+   beside OUTPUT.
+2. Dedupe each bucket on its own: sort by `_row`, `unique(keep="first")`, write Parquet. "First"
+   is therefore the first in the input whatever order the sink wrote.
+3. Combine: scan the per-bucket files and write the CSV. With `keep_order`, sort by `_row` first.
+   The output row count is read from the Parquet footers.
+
+A hash collision only puts different rows in one bucket; `unique` compares whole rows, so they are
+never merged. `pl.PartitionBy` is unstable in polars 2.1, so pyproject pins `polars>=2.1.0,<2.2`
+and a test exercises it. Defaults are unchanged: without `buckets` the single `unique` pass runs.
+
+Row counts: no extra pass to count, and OUTPUT is never read back. The count of rows out comes
+from the pipeline (`select(len)` on the `unique`, or the Parquet footers), and the input-side
+counts run in one pass with the rejects sink (pharmacy) or the main sink (medical).
+
+Why the unique sink runs alone. Running the main sink, the rejects sink and the
+counts in one `pl.collect_all` raised peak RSS by about 0.7 GB (single pass) and 1 GB (staging) at
+10M rows, because polars caches a subplan shared by two sinks and so materializes the cleaned
+frame. Measured at 10M rows, staging alone 2.10 GB; with a rejects sink beside it 3.09 GB; with a
+count query beside it 2.11 GB. A count query shares a plan for free; a second sink does not. So
+the unique sink never shares a `collect_all` with another sink. A second cost was in the stage
+itself: with 64 open Parquet writers at the default 122,880-row group, the writers buffered about
+0.5 GB; `row_group_size=8192` brings staging to 1.58 GB.
+
+Measured as above (best of two, laptop; see the README for the table): at 10M rows the previous
+version's single pass peaks at 2.38 GB, this version's at 2.50 GB (within noise), and
+`--buckets 64` at 1.74 GB. Phase by phase on the benchmark's 10.0M-row file: single 2,294 MB;
+partitioned 1,755 MB; stage 1,625 MB; per-bucket dedupe 307 MB (13% of the single pass); one
+`unique` over the staged rows 1,102 MB. The partitioned peak is the stage: reading and cleaning
+the CSV costs about 1.4 GB (the mapped file plus polars' per-thread buffers for the NDC
+expressions) before any de-duplication, so the end-to-end saving is the distinct-row table, not the
+whole run. `keep_order` costs memory for the global sort, as the notes below predict. Wall time
+includes about 0.35 s per million rows for the field-count validation pass (`csv` module);
+replacing its loop with `set(map(len, reader))` saved only 6%, so it was left as is.
 
 ### Design for data larger than memory
+
+The design the implementation follows (the sketch below is a simplification: it is not a
+streaming pass in polars, and the sort for order is optional):
 
 Idea: two identical rows have the same hash, so they land in the same bucket. Split the data into
 buckets small enough to fit in memory, dedupe each bucket on its own, and the union of the results

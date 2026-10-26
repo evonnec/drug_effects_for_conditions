@@ -337,3 +337,27 @@ def test_medical_dedupe(case: tuple[list[Row], list[bool]]) -> None:
     assert stats.rows_in == len(rows)
     assert stats.rows_out == len(want)
     assert stats.duplicates_removed == len(rows) - len(want)
+
+
+@settings(max_examples=40)
+@given(pharmacy_csvs(), st.integers(1, 16))
+@example(make_case([]), 1)
+@example(make_case([_ROW, _ROW, [*_ROW[:4], "0"]]), 3)
+@example(make_case([[*_ROW[:2], ndc, *_ROW[3:]] for ndc in ndc_forms("00002322730")[:4]]), 16)
+def test_partitioned_dedupe_matches_the_single_pass(case: GeneratedCsv, buckets: int) -> None:
+    # Whatever the bucket count: the same rows and stats, rejects included, and with keep_order
+    # the same bytes. Respelled NDCs are the case that matters: they must land in one bucket.
+    with tempfile.TemporaryDirectory() as tmp:
+        src = Path(tmp, "in.csv")
+        src.write_bytes(case.data)
+        single, part, ordered = (Path(tmp, f"{n}.csv") for n in ("single", "part", "ordered"))
+        stats = dedupe_ndc_pharm_data(src, single)
+        assert dedupe_ndc_pharm_data(src, part, buckets=buckets) == stats
+        assert dedupe_ndc_pharm_data(src, ordered, buckets=buckets, keep_order=True) == stats
+        got = Counter(tuple(row) for row in parse(part.read_bytes())[1:])
+        assert got == Counter(tuple(row) for row in parse(single.read_bytes())[1:])
+        assert set(got.values()) <= {1}
+        assert ordered.read_bytes() == single.read_bytes()
+        for name in ("part", "ordered"):
+            same = Path(tmp, f"{name}.rejects.csv").read_bytes()
+            assert same == Path(tmp, "single.rejects.csv").read_bytes()

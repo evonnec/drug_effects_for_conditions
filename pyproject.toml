@@ -20,7 +20,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
 ]
 dependencies = [
-    "polars>=2.1.0",
+    # pl.PartitionBy, behind the --buckets mode, is documented as unstable in 2.1 and may change
+    # in any release, so stay on 2.1 until a newer polars has been checked against it.
+    "polars>=2.1.0,<2.2",
 ]
 
 [project.urls]
@@ -69,7 +71,7 @@ python_version = "3.15"
 strict = true
 # src/ is the import root, so checks don't depend on the editable-install .pth file.
 mypy_path = "src"
-files = ["src", "tests"]
+files = ["src", "tests", "benchmarks"]
 
 [tool.pytest.ini_options]
 minversion = "9.0"
