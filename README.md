@@ -68,15 +68,16 @@ Options:
 
 - `--rejects PATH` writes the rejects file to `PATH`. The default is the OUTPUT stem plus
   `.rejects.csv` next to OUTPUT (`output/cleaned_pharm_data.rejects.csv` above).
-- `--strict` exits with code 2 if any row was rejected. The files are still written.
+- `--strict` exits with code 3 if any row was rejected. The files are still written.
 
-Missing parent directories of the output path are created. Exit codes:
+Missing parent directories of the output and rejects paths are created. Exit codes:
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
 | 1 | Input file not found, header is not the pharmacy schema, or the rejects file is the same file as INPUT or OUTPUT, or OUTPUT is the same file as INPUT |
-| 2 | `--strict` and at least one row was rejected, or a usage error (for example, no subcommand) |
+| 2 | Usage error (for example, no subcommand) |
+| 3 | `--strict` and at least one row was rejected |
 
 `python -m drug_effects_for_conditions` is equivalent to the console script.
 

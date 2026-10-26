@@ -176,11 +176,18 @@ def test_rejects_file_is_written_with_header_when_nothing_is_rejected(tmp_path: 
     assert (tmp_path / "out.rejects.csv").read_text() == header + "\n"
 
 
-@pytest.mark.parametrize(("extra", "code"), [([], 0), (["--strict"], 2)])
+@pytest.mark.parametrize(("extra", "code"), [([], 0), (["--strict"], 3)])
 def test_strict_exit_code(tmp_path: Path, extra: list[str], code: int) -> None:
     src, out = write_with_reject(tmp_path / "in.csv"), tmp_path / "out.csv"
     assert cli.main(["dedupe-pharmacy", *extra, str(src), str(out)]) == code
     assert out.is_file()  # --strict changes the exit code, not what is written
+
+
+def test_custom_rejects_path_parent_is_created(tmp_path: Path) -> None:
+    src, out = write_with_reject(tmp_path / "in.csv"), tmp_path / "out.csv"
+    rejects = tmp_path / "new" / "dir" / "bad.csv"
+    assert cli.main(["dedupe-pharmacy", "--rejects", str(rejects), str(src), str(out)]) == 0
+    assert rejects.is_file()
 
 
 def test_strict_succeeds_without_rejects(tmp_path: Path) -> None:

@@ -15,7 +15,7 @@ lazy from drug_effects_for_conditions.pharmacy import (
 )
 
 PROG = "drug-effects-for-conditions"
-EXIT_REJECTED = 2  # --strict and at least one row rejected
+EXIT_REJECTED = 3  # --strict and at least one row rejected; 2 is argparse's usage error
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +74,7 @@ def _dedupe_pharmacy(
         ):
             return _error(f"rejects file must be different from {other}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    rejects_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
     except FileNotFoundError:
