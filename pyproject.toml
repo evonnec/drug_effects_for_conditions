@@ -1,24 +1,73 @@
-# configuration for linters and project
 [project]
-name = "drug_effects_for_conditions"
-dependencies = [
-    "pytest",
-    "pyproject-toml",
-    "mypy",
-    "black",
-    "ruff",
+name = "drug-effects-for-conditions"
+version = "0.1.0"
+description = "De-duplicate pharmacy claims and normalize NDC codes to the 11-digit standard."
+readme = "README.md"
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "EvonneC" }]
+requires-python = ">=3.15"
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: Healthcare Industry",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.15",
+    "Topic :: Scientific/Engineering :: Information Analysis",
 ]
-version = "0.1"
+dependencies = [
+    "polars>=2.1.0",
+]
+
+[project.scripts]
+drug-effects-for-conditions = "drug_effects_for_conditions.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "hypothesis>=6.170.10",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "ruff>=0.17.2",
+]
+
+[tool.ruff]
+target-version = "py315"
+line-length = 100
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "PTH", # flake8-use-pathlib
+    "RUF", # ruff-specific rules
+]
+
+[tool.ruff.format]
+docstring-code-format = true
 
 [tool.mypy]
-[[toolmypy.overrides]]
-module = []
-ignore_missing_imports = true
+python_version = "3.15"
+strict = true
+# src/ is the import root, so checks don't depend on the editable-install .pth file.
+mypy_path = "src"
+files = ["src", "tests"]
 
 [tool.pytest.ini_options]
-pythonpath = [
-  "src",
-]
-addopts = [
-    "--import-mode=importlib",
-]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["--import-mode=importlib", "-ra"]
+strict = true
