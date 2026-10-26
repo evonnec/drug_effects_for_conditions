@@ -21,16 +21,6 @@ type MakeLink = Callable[[Literal["hard", "sym"], Path, Path], None]
 
 HEADER = "Patient_ID,Date_Submitted,NDC,Amount_Billed,Amount_Paid\n"
 ROW = "1,2020-01-01,0002-3227-30,10.00,5.00\n"
-# `raises=` pins how each case fails today (the exception escapes `main`), so a broken fixture or
-# a half-finished fix that changes the failure shows up as a real failure, not a quiet xfail.
-XFAIL_9 = pytest.mark.xfail(
-    strict=True,
-    raises=(OSError, PolarsError),
-    reason="#9: CLI prints a traceback instead of an error",
-)
-XFAIL_9_ATOMIC = pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="#9: output is not written atomically"
-)
 
 
 @pytest.fixture
@@ -114,7 +104,6 @@ def test_cli_creates_missing_output_parents(src: Path, tmp_path: Path) -> None:
     ],
     ids=["permission", "enospc", "compute"],
 )
-@XFAIL_9
 def test_sink_csv_failure_is_reported_cleanly(
     src: Path, tmp_path: Path, exc: BaseException, assert_clean_failure: CleanFailure
 ) -> None:
@@ -125,7 +114,6 @@ def test_sink_csv_failure_is_reported_cleanly(
     assert files_in(tmp_path) == ["in.csv"]
 
 
-@XFAIL_9
 def test_scan_csv_failure_is_reported_cleanly(
     src: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assert_clean_failure: CleanFailure
 ) -> None:
@@ -136,7 +124,6 @@ def test_scan_csv_failure_is_reported_cleanly(
     assert_clean_failure(code)
 
 
-@XFAIL_9
 def test_scan_permission_error_is_reported_cleanly(
     src: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assert_clean_failure: CleanFailure
 ) -> None:
@@ -147,14 +134,12 @@ def test_scan_permission_error_is_reported_cleanly(
     assert_clean_failure(code)
 
 
-@XFAIL_9
 def test_unreadable_input_file_is_reported_cleanly(
     unreadable_file: Path, tmp_path: Path, assert_clean_failure: CleanFailure
 ) -> None:
     assert_clean_failure(run_cli(unreadable_file, tmp_path / "out.csv"))
 
 
-@XFAIL_9
 def test_stats_rescan_failure_is_reported_cleanly(
     src: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, assert_clean_failure: CleanFailure
 ) -> None:
@@ -180,7 +165,6 @@ def test_stats_rescan_failure_is_reported_cleanly(
 # --- bad OUTPUT locations ----------------------------------------------------------------------
 
 
-@XFAIL_9
 def test_directory_as_output(src: Path, tmp_path: Path, assert_clean_failure: CleanFailure) -> None:
     out = tmp_path / "outdir"
     out.mkdir()
@@ -189,7 +173,6 @@ def test_directory_as_output(src: Path, tmp_path: Path, assert_clean_failure: Cl
     assert files_in(out) == []
 
 
-@XFAIL_9
 def test_file_as_output_parent(
     src: Path, tmp_path: Path, assert_clean_failure: CleanFailure
 ) -> None:
@@ -199,7 +182,6 @@ def test_file_as_output_parent(
     assert blocker.read_text() == "x"
 
 
-@XFAIL_9
 def test_read_only_output_directory(
     src: Path, read_only_dir: Path, assert_clean_failure: CleanFailure
 ) -> None:
@@ -244,7 +226,6 @@ def partial_sink(monkeypatch: pytest.MonkeyPatch) -> list[object]:
     return targets
 
 
-@XFAIL_9_ATOMIC
 def test_existing_output_survives_failed_sink(
     src: Path, tmp_path: Path, partial_sink: list[object]
 ) -> None:
@@ -269,7 +250,6 @@ def test_existing_output_survives_malformed_input(src: Path, tmp_path: Path) -> 
     assert files_in(tmp_path) == ["in.csv", "out.csv"]
 
 
-@XFAIL_9_ATOMIC
 def test_failed_run_leaves_no_partial_output(
     src: Path, tmp_path: Path, partial_sink: list[object]
 ) -> None:
@@ -283,9 +263,6 @@ def test_failed_run_leaves_no_partial_output(
 # --- a real process -----------------------------------------------------------------------------
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason="#9: CLI prints a traceback instead of an error"
-)
 def test_real_process_prints_one_error_line_and_no_traceback(tmp_path: Path) -> None:
     src = tmp_path / "empty.csv"
     src.write_bytes(b"")
@@ -307,11 +284,6 @@ def test_real_process_prints_one_error_line_and_no_traceback(tmp_path: Path) -> 
 
 
 @pytest.mark.parametrize("kind", ["hard", "sym"])
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#20: library truncates INPUT when OUTPUT is a link to it",
-)
 def test_library_never_truncates_input_through_a_link(
     tmp_path: Path, kind: Literal["hard", "sym"], make_link: MakeLink
 ) -> None:
@@ -327,11 +299,6 @@ def test_library_never_truncates_input_through_a_link(
     assert src.read_bytes() == before
 
 
-@pytest.mark.xfail(
-    strict=True,
-    raises=AssertionError,
-    reason="#21: OUTPUT-side FileNotFoundError is reported as a missing INPUT",
-)
 def test_output_side_file_not_found_does_not_blame_the_input(
     src: Path, tmp_path: Path, make_link: MakeLink, capsys: pytest.CaptureFixture[str]
 ) -> None:

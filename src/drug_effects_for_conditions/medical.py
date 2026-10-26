@@ -1,6 +1,5 @@
 """Clean medical claims CSV files."""
 
-from pathlib import Path
 from typing import Final
 
 lazy import polars as pl
@@ -11,8 +10,10 @@ from drug_effects_for_conditions.claims import (
     StrPath,
     count_rows,
     empty_to_null,
+    file_errors,
     is_blank_expr,
     scan_claims,
+    staged_outputs,
 )
 
 MEDICAL_COLUMNS: Final = (
@@ -49,11 +50,16 @@ def clean_medical(frame: pl.LazyFrame) -> pl.LazyFrame:
 
 
 def dedupe_medical_data(input_path: StrPath, output_path: StrPath) -> CleanStats:
-    """Clean `input_path` and write the result, with a header, to `output_path`."""
-    out = Path(output_path)
-    frame = empty_to_null(scan_medical(input_path))
-    clean_medical(frame).sink_csv(out)
-    counts = frame.select(
-        pl.len().alias("rows_in"), is_blank_expr().sum().alias("blank_rows")
-    ).collect()
-    return CleanStats(rows_out=count_rows(out), **counts.row(0, named=True))
+    """Clean `input_path` and write the result, with a header, to `output_path`.
+
+    The write is atomic: a failed run leaves an existing file as it was. Raises
+    `ClaimsFileError` for a malformed input file.
+    """
+    with staged_outputs(output_path) as (temp,), file_errors(input_path):
+        frame = empty_to_null(scan_medical(input_path))
+        clean_medical(frame).sink_csv(temp)
+        counts = frame.select(
+            pl.len().alias("rows_in"), is_blank_expr().sum().alias("blank_rows")
+        ).collect()
+        rows_out = count_rows(temp)
+    return CleanStats(rows_out=rows_out, **counts.row(0, named=True))

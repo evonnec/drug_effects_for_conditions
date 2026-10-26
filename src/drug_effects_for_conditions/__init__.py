@@ -3,10 +3,12 @@
 from importlib.metadata import PackageNotFoundError, version
 
 from drug_effects_for_conditions.claims import (
+    ClaimsFileError,
     ClaimsSchemaError,
     CleanStats,
     StrPath,
     scan_claims,
+    write_csv_atomic,
 )
 from drug_effects_for_conditions.cohort import (
     CohortSummary,
@@ -56,6 +58,7 @@ __all__ = [
     "MEDICAL_COLUMNS",
     "NDC_LENGTH",
     "PHARMACY_COLUMNS",
+    "ClaimsFileError",
     "ClaimsSchemaError",
     "CleanResult",
     "CleanStats",
@@ -83,4 +86,5 @@ __all__ = [
     "scan_medical",
     "scan_pharmacy",
     "summarize",
+    "write_csv_atomic",
 ]
