@@ -5,9 +5,9 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-# Lazy so `--help` and `--version` don't pay for importing polars.
-lazy import importlib.metadata
+from drug_effects_for_conditions import __version__
 
+# Lazy so `--help` and `--version` don't pay for importing polars.
 lazy from drug_effects_for_conditions.pharmacy import PharmacySchemaError, dedupe_ndc_pharm_data
 
 PROG = "drug-effects-for-conditions"
@@ -19,7 +19,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"{PROG} {importlib.metadata.version(PROG)}",
+        version=f"{PROG} {__version__}",
     )
     sub = parser.add_subparsers(dest="command", required=True, metavar="COMMAND")
 

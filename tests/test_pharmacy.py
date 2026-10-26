@@ -44,6 +44,19 @@ def test_first_occurrence_order_and_header(write_csv: WriteCsv, tmp_path: Path) 
     assert [r[0] for r in rows[1:]] == ["3", "1", "2"]
 
 
+def test_first_occurrence_order_at_scale(tmp_path: Path) -> None:
+    # Small inputs keep their order even without maintain_order=True; this size does not.
+    n = 300_000
+    ids = [(i * 7_919) % n for i in range(n)]  # a fixed permutation of 0..n-1
+    rows = [f"{i},1/1/2016,1-2,1,1" for i in ids]
+    src = tmp_path / "in.csv"
+    src.write_text("\n".join([",".join(PHARMACY_COLUMNS), *rows, *rows[::3]]) + "\n")
+    out = tmp_path / "out.csv"
+    stats = dedupe_ndc_pharm_data(src, out)
+    assert stats.rows_out == n
+    assert [r[0] for r in read_rows(out)[1:]] == [str(i) for i in ids]
+
+
 def test_values_round_trip(write_csv: WriteCsv, tmp_path: Path) -> None:
     src = write_csv(["007,1/2/2016,1-2,54.90,0"])
     out = tmp_path / "out.csv"

@@ -129,6 +129,8 @@ dmypy.json
 # IDE and OS
 .metals
 .vscode
+.DS_Store
+.ruff_cache/
 drugeffects/
 
 # Claude Code agent worktrees

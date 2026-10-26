@@ -1,6 +1,6 @@
 """Clean pharmacy claims data."""
 
-from importlib.metadata import version
+from importlib.metadata import PackageNotFoundError, version
 
 from drug_effects_for_conditions.ndc import (
     NDC_LENGTH,
@@ -17,7 +17,11 @@ from drug_effects_for_conditions.pharmacy import (
     scan_pharmacy,
 )
 
-__version__ = version("drug-effects-for-conditions")
+# Running from a source tree without an install (PYTHONPATH=src) has no package metadata.
+try:
+    __version__ = version("drug-effects-for-conditions")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 
 __all__ = [
     "NDC_LENGTH",
