@@ -170,7 +170,11 @@ def stage_buckets(frame: Lazy, stage: Path, buckets: int) -> pl.LazyFrame:
         frame.with_row_index("_row")
         .with_columns(_bucket=pl.struct(columns).hash(seed=0) % buckets)
         .sink_parquet(
-            pl.PartitionBy(stage / "in", key="_bucket", include_key=False), mkdir=True, lazy=True
+            pl.PartitionBy(stage / "in", key="_bucket", include_key=False),
+            # One open writer per bucket buffers a row group each; small groups keep that small.
+            row_group_size=8192,
+            mkdir=True,
+            lazy=True,
         )
     )
 
@@ -201,10 +205,14 @@ def write_unique_csv(
 ) -> tuple[int, pl.DataFrame]:
     """Write the distinct rows of `frame` to the CSV `target`; return the count and `counts`.
 
-    Everything runs in one pass over the input: `counts` (a one-row frame of input-side
-    statistics) and `side_sinks` (other `sink_*(lazy=True)` frames, such as a rejects file) share
-    the plan with the unique step, and the output row count comes from the pipeline, not from
-    reading `target` back.
+    `counts` is a one-row frame of input-side statistics and `side_sinks` are other
+    `sink_*(lazy=True)` frames, such as a rejects file. The output row count comes from the
+    pipeline, not from reading `target` back.
+
+    The unique step never shares a `collect_all` with another *sink*: polars caches a subplan that
+    two sinks share, which holds the whole cleaned frame in memory (measured: +1 GB at 10M rows).
+    A count query shares freely. So the unique sink runs first (with `counts` when there are no
+    side sinks), then the side sinks run together with `counts`.
 
     `buckets=None` uses one `unique(maintain_order=True)`, which keeps every distinct row in
     memory and the first-occurrence order. With `buckets`, rows are hash-partitioned to Parquet
@@ -213,24 +221,32 @@ def write_unique_csv(
     which sorts the survivors back into input order (that sort needs them all in memory).
     """
     check_buckets(buckets)
+    first_counts = [] if side_sinks else [counts]
+    rest = [*side_sinks, counts] if side_sinks else []
+
     if buckets is None:
         distinct = frame.unique(maintain_order=True)
-        out_count = distinct.select(pl.len().alias("rows_out"))
-        results = pl.collect_all(
-            [distinct.sink_csv(target, lazy=True), *side_sinks, counts, out_count]
+        first = pl.collect_all(
+            [
+                distinct.sink_csv(target, lazy=True),
+                *first_counts,
+                distinct.select(pl.len().alias("rows_out")),
+            ]
         )
-        return int(results[-1].item()), results[-2]
+        rows_out = int(first[-1].item())
+        stats = pl.collect_all(rest)[-1] if rest else first[-2]
+        return rows_out, stats
     columns = frame.collect_schema().names()
     with stage_dir(target) as stage:
-        partitioned = stage_buckets(frame, stage, buckets)
-        results = pl.collect_all([partitioned, *side_sinks, counts])
+        first = pl.collect_all([stage_buckets(frame, stage, buckets), *first_counts])
+        stats = pl.collect_all(rest)[-1] if rest else first[-1]
         if not (stage / "in").is_dir():  # every row was blank or rejected: nothing was staged
             pl.LazyFrame(schema=frame.collect_schema()).sink_csv(target)
-            return 0, results[-1]
+            return 0, stats
         survivors = dedupe_buckets(stage, columns)
         # Parquet footers hold the row counts, so this reads no data.
         rows_out = int(survivors.select(pl.len()).collect().item())
         if keep_order:
             survivors = survivors.sort("_row")
         survivors.drop("_row").sink_csv(target)
-    return rows_out, results[-1]
+    return rows_out, stats

@@ -121,8 +121,8 @@ cleaners:
 
 1. Stage: the rows after the blank filter, NDC normalization (pharmacy) or code stripping
    (medical) get a `_row` index and a bucket `hash(whole row) % N`, and are written with
-   `sink_parquet(pl.PartitionBy(..., key="_bucket"))` to a scratch directory beside OUTPUT. Rejects
-   and the counts run in the same pass.
+   `sink_parquet(pl.PartitionBy(..., key="_bucket"), row_group_size=8192)` to a scratch directory
+   beside OUTPUT.
 2. Dedupe each bucket on its own: sort by `_row`, `unique(keep="first")`, write Parquet. "First"
    is therefore the first in the input whatever order the sink wrote.
 3. Combine: scan the per-bucket files and write the CSV. With `keep_order`, sort by `_row` first.
@@ -132,25 +132,29 @@ A hash collision only puts different rows in one bucket; `unique` compares whole
 never merged. `pl.PartitionBy` is unstable in polars 2.1, so pyproject pins `polars>=2.1.0,<2.2`
 and a test exercises it. Defaults are unchanged: without `buckets` the single `unique` pass runs.
 
-Measured on the pharmacy sample repeated to 20.0M rows (0.88 GB), 64 buckets, on a laptop:
+Row counts: no extra pass to count, and OUTPUT is never read back. The count of rows out comes
+from the pipeline (`select(len)` on the `unique`, or the Parquet footers), and the input-side
+counts run in one pass with the rejects sink (pharmacy) or the main sink (medical).
 
-| Phase | Wall (s) | Peak RSS (MB) |
-| --- | ---: | ---: |
-| single pass | 16.4 | 4,114 |
-| partitioned | 22.8 | 4,146 |
-| partitioned, `keep_order` | 18.7 | 4,377 |
-| stage only | 11.5 | 3,182 |
-| per-bucket dedupe only | 11.2 | 459 |
-| one `unique` over the staged Parquet | 2.8 | 2,320 |
+Why the unique sink runs alone. Running the main sink, the rejects sink and the
+counts in one `pl.collect_all` raised peak RSS by about 0.7 GB (single pass) and 1 GB (staging) at
+10M rows, because polars caches a subplan shared by two sinks and so materializes the cleaned
+frame. Measured at 10M rows, staging alone 2.10 GB; with a rejects sink beside it 3.09 GB; with a
+count query beside it 2.11 GB. A count query shares a plan for free; a second sink does not. So
+the unique sink never shares a `collect_all` with another sink. A second cost was in the stage
+itself: with 64 open Parquet writers at the default 122,880-row group, the writers buffered about
+0.5 GB; `row_group_size=8192` brings staging to 1.58 GB.
 
-The per-bucket phase is bounded as designed: 11% of the single pass's peak. The end-to-end peak
-is not lower at this size, because the CSV read plus cleaning expressions already peak near
-2.5 GB before any de-duplication, and the stage phase grows with input size (5.0 GB at 40M rows,
-where single pass peaked at 7.9 GB and the partitioned run at 6.3 GB). Bounding the stage phase
-would need a smaller read batch than polars exposes. Wall time includes about 0.35 s per million
-rows for the field-count validation pass (`csv` module); replacing its loop with
-`set(map(len, reader))` saved only 6%, so it was left as is. `keep_order` costs memory for the
-global sort, as the notes below predict.
+Measured as above (best of two, laptop; see the README for the table): at 10M rows the previous
+version's single pass peaks at 2.38 GB, this version's at 2.50 GB (within noise), and
+`--buckets 64` at 1.74 GB. Phase by phase on the benchmark's 10.0M-row file: single 2,294 MB;
+partitioned 1,755 MB; stage 1,625 MB; per-bucket dedupe 307 MB (13% of the single pass); one
+`unique` over the staged rows 1,102 MB. The partitioned peak is the stage: reading and cleaning
+the CSV costs about 1.4 GB (the mapped file plus polars' per-thread buffers for the NDC
+expressions) before any de-duplication, so the end-to-end saving is the distinct-row table, not the
+whole run. `keep_order` costs memory for the global sort, as the notes below predict. Wall time
+includes about 0.35 s per million rows for the field-count validation pass (`csv` module);
+replacing its loop with `set(map(len, reader))` saved only 6%, so it was left as is.
 
 ### Design for data larger than memory
 

@@ -124,36 +124,46 @@ the output has exactly the rows of the default run. N must be at least 1.
   memory, so it gives up most of the memory saving; use it only when the order matters. Without
   `--buckets` it does nothing, because the default pass already keeps input order.
 
-Use it when the default run is near the machine's memory. Measured on this repository's pharmacy
-sample repeated to 20,022,656 rows (0.88 GB), 64 buckets, one run per configuration on a laptop
-(see [Benchmark](#benchmark)); the 40M-row run needed 7.9 GB for the single pass, above the 4 GB
-limit set for the table:
+Use it when the default run is near the machine's memory. Peak RSS (best of two runs, a laptop)
+for the whole command on synthetic pharmacy files where almost every row is distinct:
 
-| Configuration | Wall (s) | Peak RSS (MB) |
-| --- | ---: | ---: |
-| single pass | 16.4 | 4,114 |
-| `--buckets 64` | 22.8 | 4,146 |
-| `--buckets 64 --keep-order` | 18.7 | 4,377 |
-| partition phase alone | 11.5 | 3,182 |
-| per-bucket dedupe phase alone | 11.2 | 459 |
-| one `unique` over the staged Parquet | 2.8 | 2,320 |
+| Input | Version | Wall (s) | Peak RSS (MB) |
+| --- | --- | ---: | ---: |
+| 2M rows, 83 MB | before this change | 1.54 | 634 |
+| | single pass (default) | 1.79 | 652 |
+| | `--buckets 64` | 1.99 | 670 |
+| 10M rows, 426 MB | before this change | 7.22 | 2,381 |
+| | single pass (default) | 7.65 | 2,501 |
+| | `--buckets 64` | 8.75 | 1,736 |
 
-The per-bucket phase peaks at 11% of the single pass (the target was under 25%). End to end, at
-this size, the peak is not lower: reading the CSV and cleaning the rows (partition phase) costs
-about as much memory as the single pass, and that part does not shrink with N. At 40M rows the
-partitioned run peaked at 6.3 GB against 7.9 GB. The mode pays off when the distinct rows, not
-the read, dominate memory. It is also slower on small inputs. Row counts come from the same run
-as the write; OUTPUT is never read back.
+The default is within run-to-run noise of the previous version, and the partitioned run's peak is
+about 30% lower at 10M rows. The saving grows with the number of distinct rows: the single pass
+adds about 1.1 GB per 10M distinct rows to a base of about 1.4 GB (the mapped input and the
+cleaning expressions), while the partitioned run's extra stays bounded. On small inputs it only
+costs time. Row counts come from the same runs as the writes, and OUTPUT is never read back.
 
 ### Benchmark
 
 ```
-uv run python benchmarks/dedupe_benchmark.py --rows 20000000
+uv run python benchmarks/dedupe_benchmark.py --rows 10000000
 ```
 
 It builds the input in a temp directory (the sample repeated with a distinct `Patient_ID` suffix),
-runs each configuration in a subprocess, prints the table above and deletes its files. It is not
-part of CI.
+runs each configuration in a subprocess, prints one table (wall time and peak RSS per phase) and deletes its files.
+On 10,011,328 rows (0.44 GB), 64 buckets:
+
+| Configuration | Wall (s) | Peak RSS (MB) |
+| --- | ---: | ---: |
+| single | 6.7 | 2,294 |
+| partitioned | 8.4 | 1,755 |
+| partitioned-ordered | 8.8 | 2,003 |
+| stage (read, clean, partition) | 5.8 | 1,625 |
+| buckets (per-bucket dedupe) | 5.2 | 307 |
+| parquet-unique (one unique over the staged rows) | 1.2 | 1,102 |
+
+The per-bucket phase peaks at 13% of the single pass (target: under 25%); `--keep-order` costs
+about 250 MB more here for the global sort, and far more when most rows are distinct and large. The
+benchmark is not part of CI.
 
 ### Errors and atomic writes
 
