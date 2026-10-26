@@ -130,5 +130,9 @@ dmypy.json
 .metals
 .vscode
 drugeffects/
+
 # Claude Code agent worktrees
 .claude/worktrees/
+
+# Generated CLI output
+/output/
