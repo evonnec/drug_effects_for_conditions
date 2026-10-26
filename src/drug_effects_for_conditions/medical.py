@@ -8,12 +8,13 @@ from drug_effects_for_conditions.claims import (
     ClaimsSchemaError,
     CleanStats,
     StrPath,
-    count_rows,
+    check_buckets,
     empty_to_null,
     file_errors,
     is_blank_expr,
     scan_claims,
     staged_outputs,
+    write_unique_csv,
 )
 
 MEDICAL_COLUMNS: Final = (
@@ -38,28 +39,43 @@ def scan_medical(path: StrPath) -> pl.LazyFrame:
     return scan_claims(path, MEDICAL_COLUMNS, error=MedicalSchemaError)
 
 
+def _strip_medical(frame: pl.LazyFrame) -> pl.LazyFrame:
+    """Drop blank rows and strip diagnosis padding (blank codes become null); not yet unique."""
+    frame = empty_to_null(frame).filter(~is_blank_expr())
+    diagnosis = pl.col(DIAGNOSIS_COLUMNS).str.strip_chars().replace("", None)
+    return frame.with_columns(diagnosis)
+
+
 def clean_medical(frame: pl.LazyFrame) -> pl.LazyFrame:
     """Drop blank rows, strip diagnosis padding (blank codes become null) and drop duplicates.
 
     Duplicates are dropped after stripping, keeping first occurrences. Only exact duplicates
     go: rows that differ in an amount are separate claim lines and are kept.
     """
-    frame = empty_to_null(frame).filter(~is_blank_expr())
-    diagnosis = pl.col(DIAGNOSIS_COLUMNS).str.strip_chars().replace("", None)
-    return frame.with_columns(diagnosis).unique(maintain_order=True)
+    return _strip_medical(frame).unique(maintain_order=True)
 
 
-def dedupe_medical_data(input_path: StrPath, output_path: StrPath) -> CleanStats:
+def dedupe_medical_data(
+    input_path: StrPath,
+    output_path: StrPath,
+    *,
+    buckets: int | None = None,
+    keep_order: bool = False,
+) -> CleanStats:
     """Clean `input_path` and write the result, with a header, to `output_path`.
 
     The write is atomic: a failed run leaves an existing file as it was. Raises
-    `ClaimsFileError` for a malformed input file.
+    `ClaimsFileError` for a malformed input file and `ValueError` for `buckets < 1`.
+
+    `buckets` and `keep_order` work as in `dedupe_ndc_pharm_data`: `buckets=N` trades the single
+    in-memory `unique` for N hash partitions de-duplicated one at a time, and `keep_order=True`
+    restores input order (a no-op without `buckets`).
     """
+    check_buckets(buckets)
     with staged_outputs(output_path) as (temp,), file_errors(input_path):
         frame = empty_to_null(scan_medical(input_path))
-        clean_medical(frame).sink_csv(temp)
-        counts = frame.select(
-            pl.len().alias("rows_in"), is_blank_expr().sum().alias("blank_rows")
-        ).collect()
-        rows_out = count_rows(temp)
-    return CleanStats(rows_out=rows_out, **counts.row(0, named=True))
+        counts = frame.select(pl.len().alias("rows_in"), is_blank_expr().sum().alias("blank_rows"))
+        rows_out, counted = write_unique_csv(
+            _strip_medical(frame), temp, counts=counts, buckets=buckets, keep_order=keep_order
+        )
+    return CleanStats(rows_out=rows_out, **counted.row(0, named=True))

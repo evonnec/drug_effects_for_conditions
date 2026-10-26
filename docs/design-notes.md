@@ -109,11 +109,53 @@ mypy, which helps correctness, not performance.
 
 The limit is `unique`. To know whether a row has been seen, it must remember every distinct row,
 so memory grows with the number of distinct rows. That is fine for tens of millions of rows on a
-typical machine and fails when the distinct rows exceed memory. The script also reads the input
-twice (once to count rows, once to run the plan) and the output once more to count what was
-written.
+typical machine and fails when the distinct rows exceed memory. Row counts for the summary come
+from the same run as the write (`pl.collect_all` over lazy sinks and count queries that share one
+plan), so neither the input nor the output is read again to count.
+
+### Implemented: `buckets` and `keep_order`
+
+`dedupe_ndc_pharm_data` and `dedupe_medical_data` (and the `--buckets N` / `--keep-order` CLI
+options) implement the design below with polars, in `claims.write_unique_csv`, shared by both
+cleaners:
+
+1. Stage: the rows after the blank filter, NDC normalization (pharmacy) or code stripping
+   (medical) get a `_row` index and a bucket `hash(whole row) % N`, and are written with
+   `sink_parquet(pl.PartitionBy(..., key="_bucket"))` to a scratch directory beside OUTPUT. Rejects
+   and the counts run in the same pass.
+2. Dedupe each bucket on its own: sort by `_row`, `unique(keep="first")`, write Parquet. "First"
+   is therefore the first in the input whatever order the sink wrote.
+3. Combine: scan the per-bucket files and write the CSV. With `keep_order`, sort by `_row` first.
+   The output row count is read from the Parquet footers.
+
+A hash collision only puts different rows in one bucket; `unique` compares whole rows, so they are
+never merged. `pl.PartitionBy` is unstable in polars 2.1, so pyproject pins `polars>=2.1.0,<2.2`
+and a test exercises it. Defaults are unchanged: without `buckets` the single `unique` pass runs.
+
+Measured on the pharmacy sample repeated to 20.0M rows (0.88 GB), 64 buckets, on a laptop:
+
+| Phase | Wall (s) | Peak RSS (MB) |
+| --- | ---: | ---: |
+| single pass | 16.4 | 4,114 |
+| partitioned | 22.8 | 4,146 |
+| partitioned, `keep_order` | 18.7 | 4,377 |
+| stage only | 11.5 | 3,182 |
+| per-bucket dedupe only | 11.2 | 459 |
+| one `unique` over the staged Parquet | 2.8 | 2,320 |
+
+The per-bucket phase is bounded as designed: 11% of the single pass's peak. The end-to-end peak
+is not lower at this size, because the CSV read plus cleaning expressions already peak near
+2.5 GB before any de-duplication, and the stage phase grows with input size (5.0 GB at 40M rows,
+where single pass peaked at 7.9 GB and the partitioned run at 6.3 GB). Bounding the stage phase
+would need a smaller read batch than polars exposes. Wall time includes about 0.35 s per million
+rows for the field-count validation pass (`csv` module); replacing its loop with
+`set(map(len, reader))` saved only 6%, so it was left as is. `keep_order` costs memory for the
+global sort, as the notes below predict.
 
 ### Design for data larger than memory
+
+The design the implementation follows (the sketch below is a simplification: it is not a
+streaming pass in polars, and the sort for order is optional):
 
 Idea: two identical rows have the same hash, so they land in the same bucket. Split the data into
 buckets small enough to fit in memory, dedupe each bucket on its own, and the union of the results

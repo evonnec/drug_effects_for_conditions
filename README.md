@@ -67,7 +67,8 @@ Each command prints its summary to stderr. For `dedupe-medical`:
 read 30000 rows, wrote 28285 rows (1715 duplicates removed, 0 blank) to output/cleaned_medical_data.csv
 ```
 
-`dedupe-medical` takes no options. The rest of this section describes `dedupe-pharmacy`, apart
+`dedupe-medical` takes only the [partitioning options](#large-inputs---buckets-and---keep-order).
+The rest of this section describes `dedupe-pharmacy`, apart
 from [Errors and atomic writes](#errors-and-atomic-writes), which applies to all three commands.
 
 The `dedupe-pharmacy` summary is:
@@ -91,6 +92,7 @@ Options:
 - `--rejects PATH` writes the rejects file to `PATH`. The default is the OUTPUT stem plus
   `.rejects.csv` next to OUTPUT (`output/cleaned_pharm_data.rejects.csv` above).
 - `--strict` exits with code 3 if any row was rejected. The files are still written.
+- `--buckets N` and `--keep-order`: see [Large inputs](#large-inputs---buckets-and---keep-order).
 
 Missing parent directories of the output and rejects paths are created. Exit codes (`dedupe-medical` and `cohort` use 0, 1 and 2 only):
 
@@ -100,6 +102,58 @@ Missing parent directories of the output and rejects paths are created. Exit cod
 | 1 | Any error, printed as one `error:` line (see below) |
 | 2 | Usage error (for example, no subcommand) |
 | 3 | `--strict` and at least one row was rejected |
+
+### Large inputs: `--buckets` and `--keep-order`
+
+Both dedupe commands accept two options:
+
+```
+uv run drug-effects-for-conditions dedupe-pharmacy big.csv out.csv --buckets 64
+uv run drug-effects-for-conditions dedupe-medical big.csv out.csv --buckets 64 --keep-order
+```
+
+By default one `unique` pass remembers every distinct row, so peak memory grows with the number
+of distinct rows and the run cannot spill to disk. With `--buckets N` each row is hashed to one of
+N buckets in a scratch directory (`.NAME.PID.tmp.PID.stage`, beside OUTPUT and always removed),
+each bucket is de-duplicated alone, and the results are concatenated. Equal rows share a bucket, so
+the output has exactly the rows of the default run. N must be at least 1.
+
+- Without `--keep-order` the output rows are in bucket order (first occurrences within a bucket),
+  not input order. The set of rows is the same.
+- `--keep-order` sorts the survivors back into input order. That sort holds every distinct row in
+  memory, so it gives up most of the memory saving; use it only when the order matters. Without
+  `--buckets` it does nothing, because the default pass already keeps input order.
+
+Use it when the default run is near the machine's memory. Measured on this repository's pharmacy
+sample repeated to 20,022,656 rows (0.88 GB), 64 buckets, one run per configuration on a laptop
+(see [Benchmark](#benchmark)); the 40M-row run needed 7.9 GB for the single pass, above the 4 GB
+limit set for the table:
+
+| Configuration | Wall (s) | Peak RSS (MB) |
+| --- | ---: | ---: |
+| single pass | 16.4 | 4,114 |
+| `--buckets 64` | 22.8 | 4,146 |
+| `--buckets 64 --keep-order` | 18.7 | 4,377 |
+| partition phase alone | 11.5 | 3,182 |
+| per-bucket dedupe phase alone | 11.2 | 459 |
+| one `unique` over the staged Parquet | 2.8 | 2,320 |
+
+The per-bucket phase peaks at 11% of the single pass (the target was under 25%). End to end, at
+this size, the peak is not lower: reading the CSV and cleaning the rows (partition phase) costs
+about as much memory as the single pass, and that part does not shrink with N. At 40M rows the
+partitioned run peaked at 6.3 GB against 7.9 GB. The mode pays off when the distinct rows, not
+the read, dominate memory. It is also slower on small inputs. Row counts come from the same run
+as the write; OUTPUT is never read back.
+
+### Benchmark
+
+```
+uv run python benchmarks/dedupe_benchmark.py --rows 20000000
+```
+
+It builds the input in a temp directory (the sample repeated with a distinct `Patient_ID` suffix),
+runs each configuration in a subprocess, prints the table above and deletes its files. It is not
+part of CI.
 
 ### Errors and atomic writes
 
@@ -262,6 +316,13 @@ from drug_effects_for_conditions import (
 stats = dedupe_ndc_pharm_data("data/pharmacy_data_sample.csv", "output/cleaned_pharm_data.csv")
 print(stats.rows_in, stats.blank_rows, stats.rejected, stats.rows_out, stats.duplicates_removed)
 
+# For inputs near memory size: buckets=N de-duplicates in N hash partitions, one at a time.
+# keep_order=True restores input order; without buckets it does nothing. buckets < 1 is a
+# ValueError. dedupe_medical_data takes the same keywords.
+stats = dedupe_ndc_pharm_data(
+    "data/pharmacy_data_sample.csv", "output/cleaned_pharm_data.csv", buckets=64
+)
+
 # Or work lazily and keep the results as polars LazyFrames.
 frame = scan_pharmacy("data/pharmacy_data_sample.csv")  # checks the header, reads strings
 result = clean_pharmacy(frame)  # drop blanks, split off invalid NDCs, normalize, unique rows
@@ -335,13 +396,14 @@ never validate. Validity is separate: `is_valid_ndc` (plain strings) and `ndc_is
 ├── src/drug_effects_for_conditions/
 │   ├── __init__.py     public API and __version__
 │   ├── __main__.py     python -m entry point
-│   ├── claims.py       shared scan, blank-row and stats helpers
+│   ├── claims.py       shared scan, blank-row, unique and partitioned-unique helpers
 │   ├── cli.py          argparse CLI
 │   ├── cohort.py       drug X then condition Y cohort and its counts
 │   ├── medical.py      scan, clean and de-duplicate medical CSVs
 │   ├── ndc.py          NDC normalization and validation
 │   ├── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
 │   └── reference.py    load the NDC and diagnosis-code lists, match NDCs
+├── benchmarks/         manual de-duplication benchmark (not in CI)
 ├── tests/              pytest and hypothesis tests
 ├── data/               synthetic sample files
 ├── docs/               design notes

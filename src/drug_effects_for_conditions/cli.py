@@ -4,6 +4,7 @@ import argparse
 import sys
 from collections.abc import Sequence
 from pathlib import Path
+from typing import Any
 
 # Lazy so `--help` and `--version` don't pay for importing polars.
 lazy from polars.exceptions import InvalidOperationError
@@ -38,6 +39,26 @@ PROG = "drug-effects-for-conditions"
 EXIT_REJECTED = 3  # --strict and at least one row rejected; 2 is argparse's usage error
 
 
+def _add_partition_options(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--buckets",
+        metavar="N",
+        type=int,
+        help=(
+            "de-duplicate in N hash partitions on disk, one at a time, so memory follows the "
+            "largest partition instead of every distinct row (default: one in-memory pass)"
+        ),
+    )
+    parser.add_argument(
+        "--keep-order",
+        action="store_true",
+        help=(
+            "with --buckets, restore input order in the output (needs memory for the distinct "
+            "rows); without --buckets the output is always in input order"
+        ),
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser."""
     parser = argparse.ArgumentParser(prog=PROG, description=__doc__)
@@ -69,6 +90,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=f"exit with code {EXIT_REJECTED} if any row was rejected",
     )
+    _add_partition_options(dedupe)
 
     medical = sub.add_parser(
         "dedupe-medical",
@@ -80,6 +102,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     medical.add_argument("input", metavar="INPUT", type=Path, help="medical claims CSV to read")
     medical.add_argument("output", metavar="OUTPUT", type=Path, help="CSV file to write")
+    _add_partition_options(medical)
 
     cohort = sub.add_parser(
         "cohort",
@@ -153,9 +176,21 @@ def _summary(stats: CleanStats, output_path: Path, *, rejects: bool) -> str:
     return f"read {stats.rows_in} rows, wrote {stats.rows_out} rows ({detail}) to {output_path}"
 
 
-def _dedupe_pharmacy(
-    input_path: Path, output_path: Path, rejects_path: Path | None, *, strict: bool
-) -> int:
+def _partition_options(args: argparse.Namespace) -> dict[str, Any]:
+    """Library keywords for the partition flags; empty for the default single pass."""
+    if args.buckets is not None and args.buckets < 1:
+        raise _CliError("--buckets must be at least 1")
+    options: dict[str, Any] = {}
+    if args.buckets is not None:
+        options["buckets"] = args.buckets
+    if args.keep_order:
+        options["keep_order"] = True
+    return options
+
+
+def _dedupe_pharmacy(args: argparse.Namespace) -> int:
+    input_path, output_path, rejects_path = args.input, args.output, args.rejects
+    options = _partition_options(args)
     _check_paths(input_path, output_path)
     rejects_path = rejects_path or default_rejects_path(output_path)
     if rejects_path.is_dir():
@@ -165,19 +200,21 @@ def _dedupe_pharmacy(
             raise _CliError(f"rejects file must be different from {other}")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rejects_path.parent.mkdir(parents=True, exist_ok=True)
-    stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path)
+    stats = dedupe_ndc_pharm_data(input_path, output_path, rejects_path, **options)
     print(_summary(stats, output_path, rejects=True), file=sys.stderr)
     if stats.rejected:
         print(f"wrote {stats.rejected} rejected rows to {rejects_path}", file=sys.stderr)
-        if strict:
+        if args.strict:
             return EXIT_REJECTED
     return 0
 
 
-def _dedupe_medical(input_path: Path, output_path: Path) -> int:
+def _dedupe_medical(args: argparse.Namespace) -> int:
+    input_path, output_path = args.input, args.output
+    options = _partition_options(args)
     _check_paths(input_path, output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    stats = dedupe_medical_data(input_path, output_path)
+    stats = dedupe_medical_data(input_path, output_path, **options)
     print(_summary(stats, output_path, rejects=False), file=sys.stderr)
     return 0
 
@@ -227,9 +264,9 @@ def _cohort(args: argparse.Namespace) -> int:
 def _dispatch(args: argparse.Namespace) -> int:
     match args.command:
         case "dedupe-pharmacy":
-            return _dedupe_pharmacy(args.input, args.output, args.rejects, strict=args.strict)
+            return _dedupe_pharmacy(args)
         case "dedupe-medical":
-            return _dedupe_medical(args.input, args.output)
+            return _dedupe_medical(args)
         case "cohort":
             return _cohort(args)
         case _:  # pragma: no cover - argparse rejects unknown commands
