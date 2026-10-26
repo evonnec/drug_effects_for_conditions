@@ -1,101 +1,156 @@
-# Drug Effects For Conditions  
-  
-Health care company often deals with claims data, broken out into medical and pharmacy records,
-to map out the longitudinal clinical history of patients. In this example use case, we are looking to identify the patients who have developed a certain condition `Y`, after taking a particular drug `X`. 
+# drug-effects-for-conditions
 
-To allow for it, use the data set dummy_data.csv (attached):  
-  
-It has four data source files:  
-● medical_data_sample  
-● pharmacy_data_sample   
-● ndc  
-● diagnosis_code  
-  
-Medical and pharmacy are typically managed by separate entities, so that’s why the data often
-comes in two pieces. The Medical data covers the billing information for doctor visits, surgeries, diagnostics, usually submitted by medical providers, and the pharmacy data covers the billing information of prescription drugs and therapies. For example, if a patient gets a prescription from CVS, this record would appear in the pharmacy claim data, as opposed to the medical.
+Healthcare claims arrive as two separate record types: medical claims (visits, procedures,
+diagnostics) and pharmacy claims (prescription drugs and therapies). The longer-term goal of this
+project is to find patients who developed a condition `Y` after taking a drug `X`.
 
-For the medical_data:
-- Timestamped via Service_Date
-- The underlying cause of the medical service is identified by diagnosis code. Because in reality
-the underlying diagnosis can be complex, there can be more than one diagnosis code recorded
-in one claim
+This package currently covers the first step: cleaning pharmacy claims. It removes rows that are
+exact duplicates and normalizes National Drug Codes (NDCs) to the 11-digit format. It is a small
+Python 3.15 package built on [polars](https://pola.rs), with a command-line tool and a library API.
 
-For the prescription_data:
-- Timestamped via Date_Submitted
-- Drug / therapy is identified via NDC (national drug code)
-- NDC is typically 11-digit, and usually not clean data.Common issues we see are dashes
-between the numbers, and missing 0 on the front, among others. For the scope of this
-exercise, let’s consider these two as the only two issues.
+## Data
 
-Additionally, the ndc file provides the list of NDC codes for the Drug X
-And the diagnosis_code file provides the list of diagnosis_code for the Condition Y
+The `data/` directory holds four synthetic sample files. See [data/README.md](data/README.md) for
+formats.
 
-Question 1:
+| File | Contents | Columns |
+| --- | --- | --- |
+| `pharmacy_data_sample.csv` | Pharmacy claims | `Patient_ID`, `Date_Submitted`, `NDC`, `Amount_Billed`, `Amount_Paid` |
+| `medical_data_sample.csv` | Medical claims | `Patient_ID`, `Diagnosis_Code_1` to `Diagnosis_Code_4`, `Service_Date`, `Amount_Paid`, `Amount_Billed` |
+| `ndc.csv` | NDCs for drug X | none (no header, one code per line) |
+| `diagnosis_code.csv` | Diagnosis codes for condition Y | none (no header, one code per line) |
 
-The claims data comes with duplicates and NDCs are messy. Please write a script to de-
-deduplicate the data (Note: rows identical to each other in every single column is considered duplicate) and clean the NDC into standard format (11 digits and matchable to the format in tab ndc)
+NDC rules, as implemented:
 
-Remove common issues (unsaid: from pharmacy_data_sample.csv)
- - dashes between the numbers, 
- - and missing 0 on the front, among others. 
+- Remove every dash.
+- Left-pad with `0` to 11 digits.
 
-For the scope of this exercise, let’s consider these two as the only two issues.
+These are the only two issues handled. A cleaned NDC is meant to match the format in `ndc.csv`.
 
-Question 2 :
+A duplicate is a row identical to another row in every column. Rows are compared after NDC
+normalization, so two rows whose NDCs differ only by dashes or leading zeros collapse into one if
+every other column matches. The first occurrence is kept and row order is preserved.
 
-In production, we deal with data at scale ingested from various data sources. How would you go
-about designing a testing framework to ensure that this data is clean after being processed?
+## Quickstart
 
-Please share a plan that is as granular and operation-able as possible.Feel free to start high-
-level, zoom into one data field, e.g. NDC, and flesh it out to show how you would design it, using it as an example.
+Install [uv](https://docs.astral.sh/uv/), then from a clone of this repository:
 
-Question 3:
+```
+uv sync
+uv run drug-effects-for-conditions dedupe-pharmacy data/pharmacy_data_sample.csv output/cleaned_pharm_data.csv
+```
 
-Is your de-duplication script optimized for large-scale data? If not, how would you go about
-optimizing it? Please describe the algorithm step=by-step (pseudo-code is fine)
+The summary goes to stderr:
 
-Short Questions
+```
+read 32932 rows, wrote 30097 rows (2835 duplicates removed) to output/cleaned_pharm_data.csv
+```
 
-1. There are often multiple sources of truth depending on where the information is from. For
-example, the chat bot on our website records inquirer’s name, email and a short message.
-In the scenario where the inquirer is also a product user, the email reported on the chat bot
-might or might not fully agree with the record of that user in the backend database. How do
-you go about designing a warehouse storing information from both sources? What aspects
-would you consider in this design?
+Missing parent directories of the output path are created. Exit codes:
 
-2. If table A, column X has n rows with value J 
-and 
-table B, column Y has m rows with value J,
+| Code | Meaning |
+| --- | --- |
+| 0 | Success |
+| 1 | Input file not found, header is not the pharmacy schema, or output is the same file as input |
+| 2 | Usage error (for example, no subcommand) |
 
-then when we join A and B on X and Y, how many rows will the value J appear in, assuming
-both m and n are greater than zero?
+`python -m drug_effects_for_conditions` is equivalent to the console script.
 
-Your answer should include the following pieces:
-- Executable piece of code that does Question 1
-- Write-up on Question 2, 3 and short questions
+To use a built wheel instead of a clone, build it with `uv build` and run:
 
-## Set Up
-`python -m venv drugeffects`
-`source drugeffects/bin/activate`
-`pip install -e .`
-  
-## How to Run program for Q1:
-`python src/drug_effects_for_conditions/de_dupe_ndc.py data/pharmacy_data_sample output/cleaned_pharm_data` where:
-- `pharmacy_data_sample` is the csv filename that we are cleaning up NDC fields for  
-and  
-- `cleaned_pharm_data` is the output csv filename to write to.  
+```
+uvx --from dist/drug_effects_for_conditions-0.1.0-py3-none-any.whl drug-effects-for-conditions --version
+pip install dist/drug_effects_for_conditions-0.1.0-py3-none-any.whl
+```
 
-## How to Run tests for program:
-`python -m pytest`
+Each GitHub Release includes the wheel and sdist as downloads.
 
-## Question 2:  
-please find description of initial plan in `tests/clean_data_testing_framework.py`  
-  
-## Question 3:  
-The script is generally optimized with enforced typing. One thing that could be done further is to perform the cleaning on a vector. Right now we iter thru each row, make the adjustment to the index position we want and add the other pieces back on. numpy is a library to consider for it. We can also perhaps use data structures that python provides if they are faster than numpy and simply change our code. Vector transformations are generally faster and make sense for large datasets.  
-  
-## Short Questions:  
-1. I might consider a system in which we require product users to use their account in order to engage with the chatbot such that the name, email etc is consistent across data stores. Otherwise, we can perform a match on the user engaging with the chatbot and our list of product users. If not an exact match, we can use a classifier model in order to match them if it matters greatly. I would enforce it at ingestion to avoid having to deal with differing data that would remain disparate until an action is performed to unify them.  
-  
-2. It depends on what type of join we are using. if we are using a left join on A, n rows. if left join on B, m rows.
-If we are doing an outer join in the event that either table has NULL for the J value that the other table has a value, it will be the set of (A's n rows union B's m rows). if it's inner join, we will only see the rows in which the J value is there for both A and B tables.  
+## Library use
+
+```python
+from drug_effects_for_conditions import clean_pharmacy, dedupe_ndc_pharm_data, scan_pharmacy
+
+# Whole pipeline: read, clean, write. Returns row counts.
+stats = dedupe_ndc_pharm_data("data/pharmacy_data_sample.csv", "output/cleaned_pharm_data.csv")
+print(stats.rows_in, stats.rows_out, stats.duplicates_removed)
+
+# Or work lazily and keep the result as a polars LazyFrame.
+frame = scan_pharmacy("data/pharmacy_data_sample.csv")  # checks the header, reads strings
+cleaned = clean_pharmacy(frame)  # normalize NDCs, then unique rows
+print(cleaned.collect().height)
+```
+
+`scan_pharmacy` raises `FileNotFoundError` for a missing file and `PharmacySchemaError` if the
+header does not match `PHARMACY_COLUMNS`. `normalize_ndc` (plain strings) and `normalize_ndc_expr`
+(polars expression) are also exported.
+
+## Project layout
+
+```
+.
+├── src/drug_effects_for_conditions/
+│   ├── __init__.py     public API and __version__
+│   ├── __main__.py     python -m entry point
+│   ├── cli.py          argparse CLI
+│   ├── ndc.py          NDC normalization
+│   └── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
+├── tests/              pytest and hypothesis tests
+├── data/               synthetic sample files
+├── docs/               design notes
+└── .github/workflows/ci.yml
+```
+
+## Development
+
+The Python version (3.15) comes from `.python-version`; uv downloads it if needed.
+
+```
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format .
+uv run mypy
+uv build
+```
+
+Design notes on testing, scaling and data modelling are in
+[docs/design-notes.md](docs/design-notes.md).
+
+## CI and releases
+
+`.github/workflows/ci.yml` runs on pushes to `main`, on pull requests, on `v*` tags and on manual
+dispatch. Jobs:
+
+1. `lint`: `uv lock --check`, then `ruff check`. Runs in parallel with the next three.
+2. `format`: `ruff format --check`.
+3. `typecheck`: `mypy`.
+4. `test`: `pytest`, with a JUnit report uploaded.
+5. `build`: wheel and sdist via `uv build --no-sources`, smoke-tested in an isolated environment
+   (import, `--version`, and the CLI on the sample data), uploaded as the `dist` artifact.
+6. `release`: tag pushes only. Creates a GitHub Release with the wheel and sdist.
+7. `publish-pypi`: tag pushes only, and only when the repository variable `PUBLISH_TO_PYPI` is
+   `true`.
+
+To cut a release:
+
+```
+uv version --bump patch   # or minor, or major
+git commit -am "Release vX.Y.Z"
+git tag vX.Y.Z
+git push origin main vX.Y.Z
+```
+
+The tag must be `vMAJOR.MINOR.PATCH` and equal the version in `pyproject.toml`, or the release
+job fails. A suffix `aN`, `bN` or `rcN` (for example `v1.2.0rc1`) marks a pre-release.
+
+PyPI publishing is off by default. To enable it, once:
+
+1. On PyPI, add a pending trusted publisher for GitHub Actions with owner `evonnec`, repository
+   `drug_effects_for_conditions`, workflow `ci.yml` and environment `pypi`.
+2. In the repository settings, create the `pypi` environment, ideally limited to `v*` tags with
+   required reviewers.
+3. Set the repository variable `PUBLISH_TO_PYPI` to `true`.
+
+## License
+
+GPL-3.0-only. See [LICENSE](LICENSE).
