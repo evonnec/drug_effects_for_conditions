@@ -8,7 +8,13 @@ from pathlib import Path
 import pytest
 from polars.exceptions import PolarsError
 
-from drug_effects_for_conditions import PHARMACY_COLUMNS, CleanStats, cli
+from drug_effects_for_conditions import (
+    MEDICAL_COLUMNS,
+    PHARMACY_COLUMNS,
+    CleanStats,
+    cli,
+    dedupe_medical_data,
+)
 from drug_effects_for_conditions.pharmacy import clean_pharmacy, scan_pharmacy
 
 type RunDedupe = Callable[[bytes], tuple[CleanStats, bytes]]
@@ -260,3 +266,55 @@ def test_short_row_is_an_error_in_the_library(run_dedupe: RunDedupe) -> None:
     # this test also passed if the short row was padded with "" instead of nulls.
     with pytest.raises((ValueError, PolarsError)):
         run_dedupe(HDR + b"\n1,d,5\n")
+
+
+# --- #8: medical claims ------------------------------------------------------------------------
+
+MHDR = ",".join(MEDICAL_COLUMNS).encode()
+MROW = b"1,32723,,,,4/19/2016,5.39,12.32\n"
+PAD8 = b" " * 8
+
+MEDICAL_CASES = [
+    _case(
+        "padded_blank_codes_become_bare",
+        MHDR + b"\n1,32723," + b",".join([PAD8] * 3) + b",d,1,2\n",
+        MHDR + b"\n1,32723,,,,d,1,2\n",
+    ),
+    _case(
+        "v_code_padding_is_stripped",
+        MHDR + b"\n1,V5481   ,,,,d,1,2\n",
+        MHDR + b"\n1,V5481,,,,d,1,2\n",
+    ),
+    _case(
+        "padded_and_bare_rows_collapse",
+        MHDR + b"\n1,1," + PAD8 + b",,,d,1,2\n1,1,,,,d,1,2\n",
+        MHDR + b"\n1,1,,,,d,1,2\n",
+    ),
+    _case(
+        "crlf_and_trailing_blank_line",
+        MHDR + b"\r\n" + MROW.replace(b"\n", b"\r\n") * 2 + b"\r\n",
+        MHDR + b"\n" + MROW,
+    ),
+    _case(
+        "different_amounts_are_kept",
+        MHDR + b"\n1,1,,,,d,1,2\n1,1,,,,d,1,3\n",
+        MHDR + b"\n1,1,,,,d,1,2\n1,1,,,,d,1,3\n",
+    ),
+    _case(
+        "amount_text_round_trips",
+        MHDR + b"\n007,1,,,,01/02/2016,54.90,0060\n",
+        MHDR + b"\n007,1,,,,01/02/2016,54.90,0060\n",
+    ),
+    _case(
+        "code_internal_space_is_kept", MHDR + b"\n1,A B,,,,d,1,2\n", MHDR + b"\n1,A B,,,,d,1,2\n"
+    ),
+    _case("header_only", MHDR + b"\n", MHDR + b"\n"),
+]
+
+
+@pytest.mark.parametrize(("data", "expected"), MEDICAL_CASES)
+def test_medical_output_bytes(tmp_path: Path, data: bytes, expected: bytes) -> None:
+    src, out = tmp_path / "in.csv", tmp_path / "out.csv"
+    src.write_bytes(data)
+    dedupe_medical_data(src, out)
+    assert out.read_bytes() == expected

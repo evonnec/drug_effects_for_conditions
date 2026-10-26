@@ -4,10 +4,11 @@ Healthcare claims arrive as two separate record types: medical claims (visits, p
 diagnostics) and pharmacy claims (prescription drugs and therapies). The longer-term goal of this
 project is to find patients who developed a condition `Y` after taking a drug `X`.
 
-This package currently covers the first step: cleaning pharmacy claims. It removes rows that are
-exact duplicates, rejects rows whose National Drug Code (NDC) is invalid, and normalizes the
-rest to the 11-digit format. It is a small
-Python 3.15 package built on [polars](https://pola.rs), with a command-line tool and a library API.
+This package currently covers the first step: cleaning both kinds of claims. For pharmacy claims
+it removes rows that are exact duplicates, rejects rows whose National Drug Code (NDC) is invalid,
+and normalizes the rest to the 11-digit format. For medical claims it strips the padding from the
+diagnosis codes and removes exact duplicate rows. It is a small Python 3.15 package built on
+[polars](https://pola.rs), with a command-line tool and a library API.
 
 ## Data
 
@@ -39,6 +40,13 @@ A duplicate is a row identical to another row in every column. Rows are compared
 normalization, so two rows whose NDCs differ only by dashes or leading zeros collapse into one if
 every other column matches. The first occurrence is kept and row order is preserved.
 
+Medical claims follow the same rules for blank lines, empty fields, duplicates and order, with
+one difference: instead of NDC normalization, the four `Diagnosis_Code_*` columns are stripped of
+leading and trailing whitespace before comparing, and a code that is only whitespace (the sample
+pads unused slots with 8 spaces) is written as an empty field. `Patient_ID`, `Service_Date` and
+both amounts are never altered. Rows that share patient, date and codes but differ in an amount
+are separate claim lines and are kept. No rows are rejected.
+
 ## Quickstart
 
 Install [uv](https://docs.astral.sh/uv/), then from a clone of this repository:
@@ -46,9 +54,18 @@ Install [uv](https://docs.astral.sh/uv/), then from a clone of this repository:
 ```
 uv sync
 uv run drug-effects-for-conditions dedupe-pharmacy data/pharmacy_data_sample.csv output/cleaned_pharm_data.csv
+uv run drug-effects-for-conditions dedupe-medical data/medical_data_sample.csv output/cleaned_medical_data.csv
 ```
 
-The summary goes to stderr:
+Each command prints its summary to stderr. For `dedupe-medical`:
+
+```
+read 30000 rows, wrote 28285 rows (1715 duplicates removed, 0 blank) to output/cleaned_medical_data.csv
+```
+
+`dedupe-medical` takes no options. The rest of this section describes `dedupe-pharmacy`.
+
+The `dedupe-pharmacy` summary is:
 
 ```
 read 32932 rows, wrote 30094 rows (2835 duplicates removed, 0 blank, 3 rejected) to output/cleaned_pharm_data.csv
@@ -70,12 +87,12 @@ Options:
   `.rejects.csv` next to OUTPUT (`output/cleaned_pharm_data.rejects.csv` above).
 - `--strict` exits with code 3 if any row was rejected. The files are still written.
 
-Missing parent directories of the output and rejects paths are created. Exit codes:
+Missing parent directories of the output and rejects paths are created. Exit codes (`dedupe-medical` uses 0, 1 and 2 only):
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | Input file not found, header is not the pharmacy schema, or the rejects file is the same file as INPUT or OUTPUT, or OUTPUT is the same file as INPUT |
+| 1 | Input file not found, header is not the pharmacy schema (medical schema for `dedupe-medical`), or the rejects file is the same file as INPUT or OUTPUT, or OUTPUT is the same file as INPUT |
 | 2 | Usage error (for example, no subcommand) |
 | 3 | `--strict` and at least one row was rejected |
 
@@ -93,7 +110,14 @@ Each GitHub Release includes the wheel and sdist as downloads.
 ## Library use
 
 ```python
-from drug_effects_for_conditions import clean_pharmacy, dedupe_ndc_pharm_data, scan_pharmacy
+from drug_effects_for_conditions import (
+    clean_medical,
+    clean_pharmacy,
+    dedupe_medical_data,
+    dedupe_ndc_pharm_data,
+    scan_medical,
+    scan_pharmacy,
+)
 
 # Whole pipeline: read, clean, write the clean and rejects files. Returns row counts.
 stats = dedupe_ndc_pharm_data("data/pharmacy_data_sample.csv", "output/cleaned_pharm_data.csv")
@@ -105,8 +129,20 @@ result = clean_pharmacy(frame)  # drop blanks, split off invalid NDCs, normalize
 print(result.clean.collect().height, result.rejects.collect().height)
 ```
 
+Medical claims work the same way, without rejects:
+
+```python
+stats = dedupe_medical_data("data/medical_data_sample.csv", "output/cleaned_medical_data.csv")
+print(stats.rows_in, stats.blank_rows, stats.rows_out, stats.duplicates_removed)
+
+clean = clean_medical(scan_medical("data/medical_data_sample.csv"))  # a LazyFrame
+print(clean.collect().height)
+```
+
 `scan_pharmacy` raises `FileNotFoundError` for a missing file and `PharmacySchemaError` if the
-header does not match `PHARMACY_COLUMNS`. `dedupe_ndc_pharm_data` takes an optional third argument,
+header does not match `PHARMACY_COLUMNS`. `scan_medical` does the same with `MedicalSchemaError`
+and `MEDICAL_COLUMNS` (`DIAGNOSIS_COLUMNS` is the four diagnosis columns). Both errors subclass
+`ClaimsSchemaError`, which is a `ValueError`; `scan_claims(path, columns)` is the shared reader. `dedupe_ndc_pharm_data` takes an optional third argument,
 the rejects path. `clean_pharmacy` returns a frozen `CleanResult(clean, rejects)`, and
 `duplicates_removed` is `rows_in - blank_rows - rejected - rows_out`.
 
@@ -121,7 +157,9 @@ never validate. Validity is separate: `is_valid_ndc` (plain strings) and `ndc_is
 ├── src/drug_effects_for_conditions/
 │   ├── __init__.py     public API and __version__
 │   ├── __main__.py     python -m entry point
+│   ├── claims.py       shared scan, blank-row and stats helpers
 │   ├── cli.py          argparse CLI
+│   ├── medical.py      scan, clean and de-duplicate medical CSVs
 │   ├── ndc.py          NDC normalization and validation
 │   └── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
 ├── tests/              pytest and hypothesis tests
