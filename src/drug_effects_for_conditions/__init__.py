@@ -4,11 +4,14 @@ from importlib.metadata import PackageNotFoundError, version
 
 from drug_effects_for_conditions.ndc import (
     NDC_LENGTH,
+    is_valid_ndc,
+    ndc_is_valid_expr,
     normalize_ndc,
     normalize_ndc_expr,
 )
 from drug_effects_for_conditions.pharmacy import (
     PHARMACY_COLUMNS,
+    CleanResult,
     CleanStats,
     PharmacySchemaError,
     StrPath,
@@ -26,12 +29,15 @@ except PackageNotFoundError:
 __all__ = [
     "NDC_LENGTH",
     "PHARMACY_COLUMNS",
+    "CleanResult",
     "CleanStats",
     "PharmacySchemaError",
     "StrPath",
     "__version__",
     "clean_pharmacy",
     "dedupe_ndc_pharm_data",
+    "is_valid_ndc",
+    "ndc_is_valid_expr",
     "normalize_ndc",
     "normalize_ndc_expr",
     "scan_pharmacy",

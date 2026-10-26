@@ -5,7 +5,8 @@ diagnostics) and pharmacy claims (prescription drugs and therapies). The longer-
 project is to find patients who developed a condition `Y` after taking a drug `X`.
 
 This package currently covers the first step: cleaning pharmacy claims. It removes rows that are
-exact duplicates and normalizes National Drug Codes (NDCs) to the 11-digit format. It is a small
+exact duplicates, rejects rows whose National Drug Code (NDC) is invalid, and normalizes the
+rest to the 11-digit format. It is a small
 Python 3.15 package built on [polars](https://pola.rs), with a command-line tool and a library API.
 
 ## Data
@@ -20,12 +21,19 @@ formats.
 | `ndc.csv` | NDCs for drug X | none (no header, one code per line) |
 | `diagnosis_code.csv` | Diagnosis codes for condition Y | none (no header, one code per line) |
 
-NDC rules, as implemented:
+NDC rules, as implemented, applied in this order:
 
+- Validate: with every dash removed, the NDC must be 1 to 11 ASCII digits (`0`-`9` only, no
+  spaces, letters or other scripts' digits) and not all zeros. A missing or empty NDC is invalid.
+  Invalid rows are not cleaned; they go to a rejects file with a `reason` column.
 - Remove every dash.
 - Left-pad with `0` to 11 digits.
 
-These are the only two issues handled. A cleaned NDC is meant to match the format in `ndc.csv`.
+A cleaned NDC is meant to match the format in `ndc.csv`.
+
+Blank lines (every field empty or whitespace), including a trailing one, produce no output row and
+are not counted as duplicates. An empty field is one value however it was written: `,,` and `,"",`
+compare equal when de-duplicating, and both are written as `,,`.
 
 A duplicate is a row identical to another row in every column. Rows are compared after NDC
 normalization, so two rows whose NDCs differ only by dashes or leading zeros collapse into one if
@@ -43,16 +51,32 @@ uv run drug-effects-for-conditions dedupe-pharmacy data/pharmacy_data_sample.csv
 The summary goes to stderr:
 
 ```
-read 32932 rows, wrote 30097 rows (2835 duplicates removed) to output/cleaned_pharm_data.csv
+read 32932 rows, wrote 30094 rows (2835 duplicates removed, 0 blank, 3 rejected) to output/cleaned_pharm_data.csv
+wrote 3 rejected rows to output/cleaned_pharm_data.rejects.csv
 ```
+
+The second line appears only when rows were rejected. The rejects file is always written, as a
+header-only file when nothing was rejected. It has the input columns plus `reason`, and the first
+lines on the sample data are:
+
+```
+Patient_ID,Date_Submitted,NDC,Amount_Billed,Amount_Paid,reason
+1488,10/30/2015,0    -    -  ,77.95,0,NDC has characters other than digits and dashes
+```
+
+Options:
+
+- `--rejects PATH` writes the rejects file to `PATH`. The default is the OUTPUT stem plus
+  `.rejects.csv` next to OUTPUT (`output/cleaned_pharm_data.rejects.csv` above).
+- `--strict` exits with code 2 if any row was rejected. The files are still written.
 
 Missing parent directories of the output path are created. Exit codes:
 
 | Code | Meaning |
 | --- | --- |
 | 0 | Success |
-| 1 | Input file not found, header is not the pharmacy schema, or output is the same file as input |
-| 2 | Usage error (for example, no subcommand) |
+| 1 | Input file not found, header is not the pharmacy schema, or the rejects file is the same file as INPUT or OUTPUT, or OUTPUT is the same file as INPUT |
+| 2 | `--strict` and at least one row was rejected, or a usage error (for example, no subcommand) |
 
 `python -m drug_effects_for_conditions` is equivalent to the console script.
 
@@ -70,19 +94,24 @@ Each GitHub Release includes the wheel and sdist as downloads.
 ```python
 from drug_effects_for_conditions import clean_pharmacy, dedupe_ndc_pharm_data, scan_pharmacy
 
-# Whole pipeline: read, clean, write. Returns row counts.
+# Whole pipeline: read, clean, write the clean and rejects files. Returns row counts.
 stats = dedupe_ndc_pharm_data("data/pharmacy_data_sample.csv", "output/cleaned_pharm_data.csv")
-print(stats.rows_in, stats.rows_out, stats.duplicates_removed)
+print(stats.rows_in, stats.blank_rows, stats.rejected, stats.rows_out, stats.duplicates_removed)
 
-# Or work lazily and keep the result as a polars LazyFrame.
+# Or work lazily and keep the results as polars LazyFrames.
 frame = scan_pharmacy("data/pharmacy_data_sample.csv")  # checks the header, reads strings
-cleaned = clean_pharmacy(frame)  # normalize NDCs, then unique rows
-print(cleaned.collect().height)
+result = clean_pharmacy(frame)  # drop blanks, split off invalid NDCs, normalize, unique rows
+print(result.clean.collect().height, result.rejects.collect().height)
 ```
 
 `scan_pharmacy` raises `FileNotFoundError` for a missing file and `PharmacySchemaError` if the
-header does not match `PHARMACY_COLUMNS`. `normalize_ndc` (plain strings) and `normalize_ndc_expr`
-(polars expression) are also exported.
+header does not match `PHARMACY_COLUMNS`. `dedupe_ndc_pharm_data` takes an optional third argument,
+the rejects path. `clean_pharmacy` returns a frozen `CleanResult(clean, rejects)`, and
+`duplicates_removed` is `rows_in - blank_rows - rejected - rows_out`.
+
+`normalize_ndc` (plain strings) and `normalize_ndc_expr` (polars expression) only normalize and
+never validate. Validity is separate: `is_valid_ndc` (plain strings) and `ndc_is_valid_expr`
+(polars expression) agree on every input.
 
 ## Project layout
 
@@ -92,7 +121,7 @@ header does not match `PHARMACY_COLUMNS`. `normalize_ndc` (plain strings) and `n
 │   ├── __init__.py     public API and __version__
 │   ├── __main__.py     python -m entry point
 │   ├── cli.py          argparse CLI
-│   ├── ndc.py          NDC normalization
+│   ├── ndc.py          NDC normalization and validation
 │   └── pharmacy.py     scan, clean and de-duplicate pharmacy CSVs
 ├── tests/              pytest and hypothesis tests
 ├── data/               synthetic sample files

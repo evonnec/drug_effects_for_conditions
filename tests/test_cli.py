@@ -27,7 +27,10 @@ def test_dedupe_success(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> N
     assert cli.main(["dedupe-pharmacy", str(src), str(out)]) == 0
     captured = capsys.readouterr()
     assert captured.out == ""
-    assert captured.err == f"read 3 rows, wrote 2 rows (1 duplicates removed) to {out}\n"
+    assert (
+        captured.err
+        == f"read 3 rows, wrote 2 rows (1 duplicates removed, 0 blank, 0 rejected) to {out}\n"
+    )
     assert out.is_file()
 
 
@@ -48,7 +51,7 @@ def test_schema_error(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> Non
 def test_schema_error_message_is_passed_through(
     tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    def boom(input_path: object, output_path: object) -> None:
+    def boom(input_path: object, output_path: object, rejects_path: object) -> None:
         raise PharmacySchemaError("bad header")
 
     monkeypatch.setattr(cli, "dedupe_ndc_pharm_data", boom)
@@ -143,3 +146,55 @@ def test_help_and_version_do_not_import_polars() -> None:
         [sys.executable, "-c", code], capture_output=True, text=True, check=False
     )
     assert result.returncode == 0, result.stderr
+
+
+def write_with_reject(path: Path) -> Path:
+    path.write_text(HEADER + ROWS + "3,2020-01-03,ABC,1.00,2.00\n")
+    return path
+
+
+def test_rejects_default_path_and_summary(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src, out = write_with_reject(tmp_path / "in.csv"), tmp_path / "out.csv"
+    assert cli.main(["dedupe-pharmacy", str(src), str(out)]) == 0
+    rejects = tmp_path / "out.rejects.csv"
+    assert capsys.readouterr().err == (
+        f"read 3 rows, wrote 2 rows (0 duplicates removed, 0 blank, 1 rejected) to {out}\n"
+        f"wrote 1 rejected rows to {rejects}\n"
+    )
+    assert rejects.read_text().splitlines() == [
+        "Patient_ID,Date_Submitted,NDC,Amount_Billed,Amount_Paid,reason",
+        "3,2020-01-03,ABC,1.00,2.00,NDC has characters other than digits and dashes",
+    ]
+
+
+def test_rejects_file_is_written_with_header_when_nothing_is_rejected(tmp_path: Path) -> None:
+    src, out = write_csv(tmp_path / "in.csv"), tmp_path / "out.csv"
+    assert cli.main(["dedupe-pharmacy", str(src), str(out)]) == 0
+    header = "Patient_ID,Date_Submitted,NDC,Amount_Billed,Amount_Paid,reason"
+    assert (tmp_path / "out.rejects.csv").read_text() == header + "\n"
+
+
+@pytest.mark.parametrize(("extra", "code"), [([], 0), (["--strict"], 2)])
+def test_strict_exit_code(tmp_path: Path, extra: list[str], code: int) -> None:
+    src, out = write_with_reject(tmp_path / "in.csv"), tmp_path / "out.csv"
+    assert cli.main(["dedupe-pharmacy", *extra, str(src), str(out)]) == code
+    assert out.is_file()  # --strict changes the exit code, not what is written
+
+
+def test_strict_succeeds_without_rejects(tmp_path: Path) -> None:
+    src, out = write_csv(tmp_path / "in.csv"), tmp_path / "out.csv"
+    assert cli.main(["dedupe-pharmacy", "--strict", str(src), str(out)]) == 0
+
+
+@pytest.mark.parametrize("target", ["input", "output"])
+def test_rejects_path_must_differ_from_input_and_output(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], target: str
+) -> None:
+    src, out = write_with_reject(tmp_path / "in.csv"), tmp_path / "out.csv"
+    before = src.read_text()
+    rejects = src if target == "input" else out
+    assert cli.main(["dedupe-pharmacy", "--rejects", str(rejects), str(src), str(out)]) == 1
+    assert capsys.readouterr().err.startswith("error: rejects file must be different from")
+    assert src.read_text() == before

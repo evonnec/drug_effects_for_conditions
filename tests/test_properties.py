@@ -8,7 +8,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-import pytest
 from hypothesis import example, given, settings
 from hypothesis import strategies as st
 
@@ -236,13 +235,10 @@ def test_output_always_has_the_header(case: GeneratedCsv) -> None:
     assert output.startswith((",".join(HEADER) + "\n").encode())
 
 
-@pytest.mark.xfail(
-    strict=True, raises=AssertionError, reason='#19: bare empty and "" fields not deduped'
-)
 @SETTINGS
 @example(make_case([_ROW, _ROW], quote_all=[False, True]))
 @given(mixed_quoting_csvs())
 def test_quoting_style_does_not_affect_dedupe(case: GeneratedCsv) -> None:
-    # The explicit example fails today on every run, so the strict xfail is deterministic.
+    # The explicit example (bare vs quoted empty field) pins #19 on every run.
     _, output = run(case.data)
     assert parse(output)[1:] == first_occurrences(case.rows)
